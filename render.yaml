@@ -13,10 +13,11 @@ services:
       # file - you paste it in the dashboard (Environment tab) as a secret.
       - key: FINNHUB_API_KEY
         sync: false
-      # Reuse quotes for 30s to stay comfortably under Finnhub's free 60/min.
+      # Reuse quotes for 60s so ~60 tickers stay within Finnhub's free 60/min.
+      # Combined with last-known-good fallback, this keeps totals stable.
       - key: CACHE_TTL
-        value: "30"
+        value: "60"
       - key: MAX_WORKERS
-        value: "8"
+        value: "6"
       - key: PYTHON_VERSION
         value: "3.12.5"

@@ -59,7 +59,8 @@ BASE_HEADERS = {
 }
 
 _ssl_ctx = ssl.create_default_context()
-_cache = {}          # symbol -> (timestamp, quote_dict)
+_cache = {}          # symbol -> (timestamp, quote_dict)   short-lived (CACHE_TTL)
+_last_good = {}      # symbol -> quote_dict                 last successful fetch
 _cache_lock = threading.Lock()
 
 CONTENT_TYPES = {
@@ -163,14 +164,33 @@ def _fetch_yahoo(symbol):
 
 
 def fetch_quote(symbol):
-    """Fetch one quote, Finnhub first (if configured) then Yahoo fallback."""
+    """Fetch one quote, Finnhub first (if configured) then Yahoo fallback.
+
+    On failure we return the last successful quote for this symbol (flagged
+    "stale") instead of an error. This keeps every holding continuously priced
+    so net worth and the day-change don't jump around just because a provider
+    momentarily rate-limited a subset of symbols."""
     cached = _cache_get(symbol)
     if cached is not None:
         return cached
 
     result = _fetch_finnhub(symbol) or _fetch_yahoo(symbol)
-    if result is None:
-        result = {"symbol": symbol, "error": "no data from any provider"}
+    if result is not None:
+        with _cache_lock:
+            _last_good[symbol] = result
+        _cache_put(symbol, result)
+        return result
+
+    # Fetch failed: fall back to the last known-good quote if we have one.
+    with _cache_lock:
+        prev = _last_good.get(symbol)
+    if prev is not None:
+        stale = dict(prev)
+        stale["stale"] = True
+        _cache_put(symbol, stale)
+        return stale
+
+    result = {"symbol": symbol, "error": "no data from any provider"}
     _cache_put(symbol, result)
     return result
 
