@@ -1,6 +1,6 @@
 // Minimal offline shell. We intentionally NEVER cache /api/quotes so prices
 // are always live; only the static app shell is cached for offline open.
-const CACHE = "stocktracker-shell-v1";
+const CACHE = "stocktracker-shell-v2";
 const SHELL = [
   "./",
   "./index.html",

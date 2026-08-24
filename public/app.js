@@ -12,7 +12,13 @@ let refreshTimer = null;
 function loadHoldings() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      // Only trust a non-empty array. An empty array can happen if the very
+      // first load ran before seed.js was ready (e.g. during a cold start),
+      // so we re-seed instead of getting stuck on an empty portfolio.
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
   } catch (e) { /* fall through to seed */ }
   return seedHoldings();
 }
@@ -25,7 +31,9 @@ function seedHoldings() {
     price: Number(h.price) || 0,   // fallback / manual price
     manual: !!h.manual,
   }));
-  save(seed);
+  // Never persist an empty seed (would happen only if seed.js failed to load);
+  // leaving storage untouched lets the next load seed correctly.
+  if (seed.length > 0) save(seed);
   return seed;
 }
 
