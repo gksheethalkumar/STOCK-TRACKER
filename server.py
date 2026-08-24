@@ -222,38 +222,100 @@ _history_cache = {}       # (symbol, range, interval) -> (ts, {"t":[],"c":[]})
 _history_good = {}        # (symbol, range, interval) -> {"t":[],"c":[]}
 
 
+RANGE_SECONDS = {
+    "1mo": 34 * 86400, "3mo": 96 * 86400, "6mo": 190 * 86400,
+    "1y": 375 * 86400, "max": 20 * 365 * 86400,
+}
+STOOQ_INTERVAL = {"1mo": "d", "3mo": "d", "6mo": "d", "1y": "w", "max": "m"}
+
+
+def _http_text(url, timeout=12):
+    req = urllib.request.Request(url, headers=BASE_HEADERS)
+    with urllib.request.urlopen(req, timeout=timeout, context=_ssl_ctx) as resp:
+        return resp.read().decode("utf-8", "replace")
+
+
 def _spark_fetch(symbols, rng, interval):
-    """Fetch a batch of symbols from the spark endpoint. Returns
-    {symbol: {"t":[...], "c":[...]}} for whatever succeeds."""
+    """Batched Yahoo spark endpoint. Returns {symbol: {"t":[],"c":[]}}."""
     qs = urllib.parse.urlencode({
         "symbols": ",".join(symbols), "range": rng, "interval": interval,
     })
-    for attempt in range(MAX_RETRIES):
-        for host in YAHOO_HOSTS:
-            url = "https://" + host + YAHOO_SPARK_PATH + "?" + qs
-            try:
-                req = urllib.request.Request(url, headers=BASE_HEADERS)
-                with urllib.request.urlopen(req, timeout=12, context=_ssl_ctx) as resp:
-                    payload = json.loads(resp.read().decode("utf-8"))
-                results = (payload.get("spark") or {}).get("result") or []
-                out = {}
-                for item in results:
-                    sym = (item.get("symbol") or "").upper()
-                    resp_list = item.get("response") or []
-                    if not resp_list:
-                        continue
-                    r0 = resp_list[0]
-                    ts = r0.get("timestamp") or []
-                    closes = (((r0.get("indicators") or {}).get("quote") or [{}])[0]).get("close") or []
-                    pairs = [(int(t), c) for t, c in zip(ts, closes) if c is not None]
-                    if pairs:
-                        out[sym] = {"t": [p[0] for p in pairs], "c": [p[1] for p in pairs]}
-                if out:
-                    return out
-            except Exception:  # noqa: BLE001 - try next host / retry
-                pass
-        time.sleep(0.5 * (attempt + 1))
+    for host in YAHOO_HOSTS:
+        url = "https://" + host + YAHOO_SPARK_PATH + "?" + qs
+        try:
+            payload = json.loads(_http_text(url))
+            results = (payload.get("spark") or {}).get("result") or []
+            out = {}
+            for item in results:
+                sym = (item.get("symbol") or "").upper()
+                resp_list = item.get("response") or []
+                if not resp_list:
+                    continue
+                r0 = resp_list[0]
+                ts = r0.get("timestamp") or []
+                closes = (((r0.get("indicators") or {}).get("quote") or [{}])[0]).get("close") or []
+                pairs = [(int(t), c) for t, c in zip(ts, closes) if c is not None]
+                if pairs:
+                    out[sym] = {"t": [p[0] for p in pairs], "c": [p[1] for p in pairs]}
+            if out:
+                return out
+        except Exception:  # noqa: BLE001
+            pass
     return {}
+
+
+def _yahoo_chart_history(symbol, rng, interval):
+    qs = urllib.parse.urlencode({"range": rng, "interval": interval})
+    for host in YAHOO_HOSTS:
+        url = "https://" + host + "/v8/finance/chart/" + symbol + "?" + qs
+        try:
+            payload = json.loads(_http_text(url))
+            res = (payload.get("chart") or {}).get("result") or []
+            if not res:
+                continue
+            r0 = res[0]
+            ts = r0.get("timestamp") or []
+            closes = (((r0.get("indicators") or {}).get("quote") or [{}])[0]).get("close") or []
+            pairs = [(int(t), c) for t, c in zip(ts, closes) if c is not None]
+            if pairs:
+                return {"t": [p[0] for p in pairs], "c": [p[1] for p in pairs]}
+        except Exception:  # noqa: BLE001
+            pass
+    return None
+
+
+def _stooq_history(symbol, rng):
+    interval = STOOQ_INTERVAL.get(rng, "w")
+    cutoff = time.time() - RANGE_SECONDS.get(rng, RANGE_SECONDS["1y"])
+    url = "https://stooq.com/q/d/l/?s=" + symbol.lower() + ".us&i=" + interval
+    try:
+        text = _http_text(url)
+        lines = [ln for ln in text.strip().split("\n") if ln]
+        if len(lines) < 2 or not lines[0].lower().startswith("date"):
+            return None
+        t, c = [], []
+        for ln in lines[1:]:
+            parts = ln.split(",")
+            if len(parts) < 5:
+                continue
+            try:
+                ts = int(time.mktime(time.strptime(parts[0], "%Y-%m-%d")))
+                close = float(parts[4])
+            except (ValueError, OverflowError):
+                continue
+            if ts >= cutoff:
+                t.append(ts)
+                c.append(close)
+        if t:
+            return {"t": t, "c": c}
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
+def _history_one(symbol, rng, interval):
+    """Yahoo chart first, then Stooq. Used for spark misses."""
+    return _yahoo_chart_history(symbol, rng, interval) or _stooq_history(symbol, rng)
 
 
 def fetch_history(symbols, rng):
@@ -273,18 +335,31 @@ def fetch_history(symbols, rng):
         else:
             need.append(s)
 
-    # Fetch the misses in batches via spark.
+    def _store(sym, data):
+        key = (sym, rng, interval)
+        if data:
+            _history_cache[key] = (now, data)
+            _history_good[key] = data
+            resolved[sym] = data
+        elif key in _history_good:      # serve last good on failure
+            resolved[sym] = _history_good[key]
+
+    # 1) Try the cheap batched spark call first.
+    still = []
     for i in range(0, len(need), SPARK_BATCH):
         batch = need[i:i + SPARK_BATCH]
         got = _spark_fetch(batch, rng, interval)
         for s in batch:
-            key = (s, rng, interval)
             if s in got:
-                _history_cache[key] = (now, got[s])
-                _history_good[key] = got[s]
-                resolved[s] = got[s]
-            elif key in _history_good:      # serve last good on failure
-                resolved[s] = _history_good[key]
+                _store(s, got[s])
+            else:
+                still.append(s)
+
+    # 2) Fill remaining symbols concurrently via chart -> Stooq fallback.
+    if still:
+        with ThreadPoolExecutor(max_workers=min(MAX_WORKERS, len(still))) as pool:
+            for s, data in zip(still, pool.map(lambda x: _history_one(x, rng, interval), still)):
+                _store(s, data)
 
     # Build a unified timeline (union of all timestamps) and forward-fill.
     all_ts = sorted({t for v in resolved.values() for t in v["t"]})
@@ -299,7 +374,10 @@ def fetch_history(symbols, rng):
         first_known = next((x for x in aligned if x is not None), None)
         series[s] = [x if x is not None else first_known for x in aligned]
 
-    return {"timeline": all_ts, "series": series, "range": rng, "interval": interval}
+    return {
+        "timeline": all_ts, "series": series, "range": rng, "interval": interval,
+        "_debug": {"requested": len(symbols), "resolved": len(resolved)},
+    }
 
 
 class Handler(BaseHTTPRequestHandler):
