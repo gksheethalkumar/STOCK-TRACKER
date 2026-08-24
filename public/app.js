@@ -3,7 +3,10 @@
 const STORAGE_KEY = "stocktracker.holdings.v1";
 const REFRESH_MS = 20000; // auto-refresh cadence while the app is open
 
-let holdings = loadHoldings();
+let holdings = [];        // populated in boot(); NOT via loadHoldings() here,
+                          // because loadHoldings() -> save() assigns to
+                          // `holdings`, which would hit the temporal dead zone
+                          // if done during this binding's initialization.
 let quotes = {};          // symbol -> { price, previousClose, ... }
 let editingId = null;
 let refreshTimer = null;
@@ -317,6 +320,7 @@ function startAutoRefresh() {
 }
 
 // ---------- boot ----------
+holdings = loadHoldings();
 render();
 refresh();
 startAutoRefresh();
