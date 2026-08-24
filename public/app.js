@@ -79,8 +79,13 @@ function dayChangeFor(h) {
 function holdingValue(h) { return effectivePrice(h) * h.shares; }
 
 // ---------- formatting ----------
-const fmtMoney = (n, max = 2) =>
-  "$" + (Number(n) || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: max });
+const fmtMoney = (n, max = 2) => {
+  // minimumFractionDigits must never exceed maximumFractionDigits, otherwise
+  // toLocaleString throws a RangeError. When max is 0 (whole-dollar totals) we
+  // want min 0 too.
+  const min = Math.min(2, max);
+  return "$" + (Number(n) || 0).toLocaleString("en-US", { minimumFractionDigits: min, maximumFractionDigits: max });
+};
 
 function fmtPrice(n) {
   if (n == null) return "—";
