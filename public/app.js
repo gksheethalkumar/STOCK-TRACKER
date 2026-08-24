@@ -244,6 +244,121 @@ function setMarketState() {
   else label.textContent = "Net Worth · Market closed";
 }
 
+// ---------- growth chart ----------
+const HISTORY = { range: "1y", cache: {} };
+
+const RANGE_LABELS = {
+  "1mo": "past month", "3mo": "past 3 months", "6mo": "past 6 months",
+  "1y": "past year", "max": "since inception",
+};
+
+function invalidateChart() {
+  HISTORY.cache = {};
+  loadChart(HISTORY.range);
+}
+
+async function loadChart(range) {
+  HISTORY.range = range;
+  updateRangeTabs();
+  const msg = document.getElementById("chart-msg");
+  msg.textContent = "Loading chart…";
+  msg.hidden = false;
+  try {
+    let data = HISTORY.cache[range];
+    if (!data) {
+      const syms = [...new Set(holdings.filter((h) => !h.manual).map((h) => h.symbol))];
+      const url = `/api/history?range=${encodeURIComponent(range)}&symbols=${encodeURIComponent(syms.join(","))}`;
+      const res = await fetch(url, { cache: "no-store" });
+      data = await res.json();
+      HISTORY.cache[range] = data;
+    }
+    renderChart(data);
+  } catch (e) {
+    document.getElementById("chart-svg").innerHTML = "";
+    msg.textContent = "Chart unavailable right now.";
+    msg.hidden = false;
+  }
+}
+
+function updateRangeTabs() {
+  document.querySelectorAll(".range-tab").forEach((b) => {
+    b.classList.toggle("active", b.dataset.range === HISTORY.range);
+  });
+}
+
+// Reconstruct portfolio value over time = sum(shares x historical close).
+// Manual holdings and any symbol without history contribute a flat line at
+// their current value, so the total is always complete.
+function portfolioSeries(data) {
+  const timeline = data.timeline || [];
+  const series = data.series || {};
+  if (timeline.length < 2) return null;
+  const values = new Array(timeline.length).fill(0);
+  for (const h of holdings) {
+    const s = !h.manual ? series[h.symbol] : null;
+    if (s) {
+      for (let i = 0; i < timeline.length; i++) values[i] += (s[i] || 0) * h.shares;
+    } else {
+      const flat = effectivePrice(h) * h.shares;
+      for (let i = 0; i < timeline.length; i++) values[i] += flat;
+    }
+  }
+  return { timeline, values };
+}
+
+function renderChart(data) {
+  const svg = document.getElementById("chart-svg");
+  const msg = document.getElementById("chart-msg");
+  const ps = portfolioSeries(data);
+  if (!ps) {
+    svg.innerHTML = "";
+    msg.textContent = "Not enough history yet.";
+    msg.hidden = false;
+    return;
+  }
+  msg.hidden = true;
+
+  const { timeline, values } = ps;
+  const n = values.length;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = max - min || 1;
+  const W = 1000, H = 300, pad = 12;
+  const xAt = (i) => (i / (n - 1)) * W;
+  const yAt = (v) => pad + (1 - (v - min) / span) * (H - 2 * pad);
+
+  let line = "";
+  for (let i = 0; i < n; i++) line += (i ? " L" : "M") + xAt(i).toFixed(1) + " " + yAt(values[i]).toFixed(1);
+  const area = line + ` L${W} ${H} L0 ${H} Z`;
+
+  const up = values[n - 1] >= values[0];
+  const color = up ? "#2ec26b" : "#ff5c6c";
+  svg.innerHTML = `
+    <defs><linearGradient id="chartgrad" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="${color}" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="${color}" stop-opacity="0"/>
+    </linearGradient></defs>
+    <path d="${area}" fill="url(#chartgrad)"/>
+    <path d="${line}" fill="none" stroke="${color}" stroke-width="2.5"
+          vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round"/>
+    <circle cx="${xAt(n - 1).toFixed(1)}" cy="${yAt(values[n - 1]).toFixed(1)}" r="4" fill="${color}"/>`;
+
+  const first = values[0], last = values[n - 1];
+  const chg = last - first;
+  const pct = first ? (chg / first) * 100 : 0;
+  const el = document.getElementById("chart-change");
+  const sign = chg >= 0 ? "+" : "−";
+  el.textContent = `${sign}$${Math.abs(chg).toLocaleString("en-US", { maximumFractionDigits: 0 })} (${sign}${Math.abs(pct).toFixed(1)}%)`;
+  el.className = "chart-change " + (chg > 0 ? "up" : chg < 0 ? "down" : "neutral");
+  document.getElementById("chart-range-label").textContent = RANGE_LABELS[data.range] || "";
+
+  const withYear = data.range === "1y" || data.range === "max";
+  const fmtD = (t) => new Date(t * 1000).toLocaleDateString("en-US",
+    { month: "short", day: "numeric", ...(withYear ? { year: "2-digit" } : {}) });
+  document.getElementById("chart-start").textContent = fmtD(timeline[0]);
+  document.getElementById("chart-end").textContent = fmtD(timeline[n - 1]);
+}
+
 // ---------- modal (add / edit) ----------
 function openModal(h) {
   editingId = h ? h.id : null;
@@ -296,6 +411,7 @@ function saveModal() {
   closeModal();
   render();
   refresh();
+  invalidateChart();
 }
 
 function deleteHolding() {
@@ -306,6 +422,7 @@ function deleteHolding() {
     save();
     closeModal();
     render();
+    invalidateChart();
   }
 }
 
@@ -324,7 +441,12 @@ document.getElementById("reset-btn").addEventListener("click", () => {
     holdings = seedHoldings();
     render();
     refresh();
+    invalidateChart();
   }
+});
+document.getElementById("range-tabs").addEventListener("click", (e) => {
+  const btn = e.target.closest(".range-tab");
+  if (btn) loadChart(btn.dataset.range);
 });
 
 // Refresh when the app regains focus (e.g. reopened from home screen)
@@ -341,6 +463,7 @@ function startAutoRefresh() {
 holdings = loadHoldings();
 render();
 refresh();
+loadChart(HISTORY.range);
 startAutoRefresh();
 
 if ("serviceWorker" in navigator) {

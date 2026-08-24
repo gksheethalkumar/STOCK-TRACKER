@@ -114,6 +114,54 @@ main { padding: 0 12px calc(var(--safe-bottom) + 24px); max-width: 720px; margin
 .lh-price { text-align: right; min-width: 92px; }
 .lh-val { text-align: right; min-width: 96px; }
 
+/* ---------- Growth chart ---------- */
+.chart-card {
+  margin: 12px 0 4px;
+  padding: 14px 14px 10px;
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.chart-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.chart-growth { display: flex; flex-direction: column; gap: 2px; }
+.chart-change { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.chart-change.up { color: var(--green); }
+.chart-change.down { color: var(--red); }
+.chart-change.neutral { color: var(--muted); }
+.chart-range-label { font-size: 12px; color: var(--muted); }
+
+.range-tabs { display: flex; gap: 4px; flex-shrink: 0; }
+.range-tab {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 10px;
+  border-radius: 9px;
+  cursor: pointer;
+}
+.range-tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.range-tab:active { transform: scale(0.95); }
+
+.chart-wrap { position: relative; width: 100%; height: 140px; }
+#chart-svg { width: 100%; height: 100%; display: block; }
+.chart-msg {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--muted); font-size: 13px;
+}
+.chart-dates {
+  display: flex; justify-content: space-between;
+  margin-top: 6px; font-size: 11px; color: var(--muted);
+}
+
 .holdings { list-style: none; margin: 0; padding: 0; }
 
 .row {

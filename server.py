@@ -206,6 +206,102 @@ def fetch_quotes(symbols):
     return out
 
 
+# ------------------------- Historical series -------------------------
+# Powered by Yahoo's batched "spark" endpoint so we fetch many symbols per
+# request instead of one call each. Results are cached because history barely
+# changes intraday.
+YAHOO_SPARK_PATH = "/v8/finance/spark"
+HISTORY_TTL = int(os.environ.get("HISTORY_TTL", "1800"))   # 30 min
+SPARK_BATCH = 25
+# Sensible interval per range to keep payloads small.
+RANGE_INTERVAL = {
+    "1mo": "1d", "3mo": "1d", "6mo": "1d",
+    "1y": "1wk", "2y": "1wk", "5y": "1mo", "max": "1mo",
+}
+_history_cache = {}       # (symbol, range, interval) -> (ts, {"t":[],"c":[]})
+_history_good = {}        # (symbol, range, interval) -> {"t":[],"c":[]}
+
+
+def _spark_fetch(symbols, rng, interval):
+    """Fetch a batch of symbols from the spark endpoint. Returns
+    {symbol: {"t":[...], "c":[...]}} for whatever succeeds."""
+    qs = urllib.parse.urlencode({
+        "symbols": ",".join(symbols), "range": rng, "interval": interval,
+    })
+    for attempt in range(MAX_RETRIES):
+        for host in YAHOO_HOSTS:
+            url = "https://" + host + YAHOO_SPARK_PATH + "?" + qs
+            try:
+                req = urllib.request.Request(url, headers=BASE_HEADERS)
+                with urllib.request.urlopen(req, timeout=12, context=_ssl_ctx) as resp:
+                    payload = json.loads(resp.read().decode("utf-8"))
+                results = (payload.get("spark") or {}).get("result") or []
+                out = {}
+                for item in results:
+                    sym = (item.get("symbol") or "").upper()
+                    resp_list = item.get("response") or []
+                    if not resp_list:
+                        continue
+                    r0 = resp_list[0]
+                    ts = r0.get("timestamp") or []
+                    closes = (((r0.get("indicators") or {}).get("quote") or [{}])[0]).get("close") or []
+                    pairs = [(int(t), c) for t, c in zip(ts, closes) if c is not None]
+                    if pairs:
+                        out[sym] = {"t": [p[0] for p in pairs], "c": [p[1] for p in pairs]}
+                if out:
+                    return out
+            except Exception:  # noqa: BLE001 - try next host / retry
+                pass
+        time.sleep(0.5 * (attempt + 1))
+    return {}
+
+
+def fetch_history(symbols, rng):
+    interval = RANGE_INTERVAL.get(rng, "1wk")
+    symbols = [s for s in dict.fromkeys(s.strip().upper() for s in symbols) if s]
+    if not symbols:
+        return {"timeline": [], "series": {}, "range": rng, "interval": interval}
+
+    now = time.time()
+    resolved = {}   # symbol -> {"t","c"}
+    need = []
+    for s in symbols:
+        key = (s, rng, interval)
+        c = _history_cache.get(key)
+        if c and now - c[0] < HISTORY_TTL:
+            resolved[s] = c[1]
+        else:
+            need.append(s)
+
+    # Fetch the misses in batches via spark.
+    for i in range(0, len(need), SPARK_BATCH):
+        batch = need[i:i + SPARK_BATCH]
+        got = _spark_fetch(batch, rng, interval)
+        for s in batch:
+            key = (s, rng, interval)
+            if s in got:
+                _history_cache[key] = (now, got[s])
+                _history_good[key] = got[s]
+                resolved[s] = got[s]
+            elif key in _history_good:      # serve last good on failure
+                resolved[s] = _history_good[key]
+
+    # Build a unified timeline (union of all timestamps) and forward-fill.
+    all_ts = sorted({t for v in resolved.values() for t in v["t"]})
+    series = {}
+    for s, v in resolved.items():
+        d = dict(zip(v["t"], v["c"]))
+        aligned, last = [], None
+        for t in all_ts:
+            if d.get(t) is not None:
+                last = d[t]
+            aligned.append(last)
+        first_known = next((x for x in aligned if x is not None), None)
+        series[s] = [x if x is not None else first_known for x in aligned]
+
+    return {"timeline": all_ts, "series": series, "range": rng, "interval": interval}
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "StockTracker/1.0"
 
@@ -235,6 +331,17 @@ class Handler(BaseHTTPRequestHandler):
             symbols = symbols_raw.split(",") if symbols_raw else []
             quotes = fetch_quotes(symbols)
             return self._send_json({"quotes": quotes, "fetchedAt": int(time.time())})
+
+        if path == "/api/history":
+            params = urllib.parse.parse_qs(parsed.query)
+            symbols_raw = params.get("symbols", [""])[0]
+            symbols = symbols_raw.split(",") if symbols_raw else []
+            rng = (params.get("range", ["1y"])[0] or "1y").lower()
+            if rng not in RANGE_INTERVAL:
+                rng = "1y"
+            data = fetch_history(symbols, rng)
+            data["fetchedAt"] = int(time.time())
+            return self._send_json(data)
 
         return self._serve_static(path)
 

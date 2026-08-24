@@ -31,6 +31,30 @@
   </header>
 
   <main>
+    <section class="chart-card">
+      <div class="chart-head">
+        <div class="chart-growth">
+          <span id="chart-change" class="chart-change neutral">—</span>
+          <span id="chart-range-label" class="chart-range-label"></span>
+        </div>
+        <div class="range-tabs" id="range-tabs">
+          <button data-range="1mo" class="range-tab">1M</button>
+          <button data-range="3mo" class="range-tab">3M</button>
+          <button data-range="6mo" class="range-tab">6M</button>
+          <button data-range="1y" class="range-tab active">1Y</button>
+          <button data-range="max" class="range-tab">All</button>
+        </div>
+      </div>
+      <div class="chart-wrap">
+        <svg id="chart-svg" viewBox="0 0 1000 300" preserveAspectRatio="none" aria-hidden="true"></svg>
+        <div id="chart-msg" class="chart-msg">Loading chart…</div>
+      </div>
+      <div class="chart-dates">
+        <span id="chart-start"></span>
+        <span id="chart-end"></span>
+      </div>
+    </section>
+
     <div class="list-head">
       <div class="lh-sym">Holding</div>
       <div class="lh-price">Price</div>
