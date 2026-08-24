@@ -1,7 +1,7 @@
 "use strict";
 
 const STORAGE_KEY = "stocktracker.holdings.v1";
-const REFRESH_MS = 20000; // auto-refresh cadence while the app is open
+const REFRESH_MS = 60000; // auto-refresh cadence while the app is open (1 min)
 
 let holdings = [];        // populated in boot(); NOT via loadHoldings() here,
                           // because loadHoldings() -> save() assigns to
