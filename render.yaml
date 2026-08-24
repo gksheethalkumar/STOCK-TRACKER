@@ -1,0 +1,22 @@
+# Render Blueprint - deploys the Stock Tracker as an always-on web service.
+# Docs: https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: stock-tracker
+    runtime: python
+    plan: free
+    healthCheckPath: /api/health
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python3 server.py"
+    envVars:
+      # Your Finnhub API key. sync:false means Render will NOT read it from this
+      # file - you paste it in the dashboard (Environment tab) as a secret.
+      - key: FINNHUB_API_KEY
+        sync: false
+      # Reuse quotes for 30s to stay comfortably under Finnhub's free 60/min.
+      - key: CACHE_TTL
+        value: "30"
+      - key: MAX_WORKERS
+        value: "8"
+      - key: PYTHON_VERSION
+        value: "3.12.5"

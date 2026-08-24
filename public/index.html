@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#0b0f17" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Net Worth" />
+  <title>Net Worth · Stock Tracker</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <link rel="icon" href="icons/icon-192.png" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="summary">
+      <div class="summary-label">
+        <span id="market-dot" class="dot"></span>
+        <span id="market-label">Net Worth</span>
+      </div>
+      <div id="networth" class="networth">$—</div>
+      <div id="day-change" class="day-change neutral">—</div>
+      <div id="updated" class="updated">Loading…</div>
+    </div>
+    <div class="actions">
+      <button id="refresh-btn" class="icon-btn" title="Refresh" aria-label="Refresh">⟳</button>
+      <button id="add-btn" class="icon-btn primary" title="Add ticker" aria-label="Add ticker">＋</button>
+    </div>
+  </header>
+
+  <main>
+    <div class="list-head">
+      <div class="lh-sym">Holding</div>
+      <div class="lh-price">Price</div>
+      <div class="lh-val">Value</div>
+    </div>
+    <ul id="holdings" class="holdings"></ul>
+    <p id="empty" class="empty" hidden>No holdings yet. Tap ＋ to add one.</p>
+    <footer class="foot">
+      <button id="reset-btn" class="text-btn">Reset to portfolio</button>
+      <span class="foot-note">Prices via Yahoo Finance · for personal tracking only</span>
+    </footer>
+  </main>
+
+  <!-- Add / Edit modal -->
+  <div id="modal" class="modal-backdrop" hidden>
+    <div class="modal" role="dialog" aria-modal="true">
+      <h2 id="modal-title">Add holding</h2>
+      <label class="field">
+        <span>Ticker symbol</span>
+        <input id="f-symbol" type="text" autocapitalize="characters" autocomplete="off" placeholder="e.g. AAPL" />
+      </label>
+      <label class="field">
+        <span>Shares / units</span>
+        <input id="f-shares" type="text" inputmode="decimal" placeholder="e.g. 12.5" />
+      </label>
+      <label class="field">
+        <span>Manual price override <small>(leave blank for live price)</small></span>
+        <input id="f-price" type="text" inputmode="decimal" placeholder="Live" />
+      </label>
+      <label class="check">
+        <input id="f-manual" type="checkbox" />
+        <span>Always use my price (no live updates)</span>
+      </label>
+      <div class="modal-actions">
+        <button id="modal-delete" class="text-btn danger" hidden>Delete</button>
+        <span class="spacer"></span>
+        <button id="modal-cancel" class="text-btn">Cancel</button>
+        <button id="modal-save" class="btn primary">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="seed.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
