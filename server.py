@@ -410,6 +410,29 @@ class Handler(BaseHTTPRequestHandler):
             quotes = fetch_quotes(symbols)
             return self._send_json({"quotes": quotes, "fetchedAt": int(time.time())})
 
+        if path == "/api/histdebug":
+            params = urllib.parse.parse_qs(parsed.query)
+            sym = (params.get("symbol", ["AAPL"])[0] or "AAPL").upper()
+
+            def probe(url):
+                try:
+                    req = urllib.request.Request(url, headers=BASE_HEADERS)
+                    with urllib.request.urlopen(req, timeout=12, context=_ssl_ctx) as r:
+                        body = r.read().decode("utf-8", "replace")
+                    return {"code": r.getcode(), "len": len(body), "head": body[:160]}
+                except urllib.error.HTTPError as e:
+                    return {"error": "HTTP " + str(e.code)}
+                except Exception as e:  # noqa: BLE001
+                    return {"error": type(e).__name__ + ": " + str(e)[:120]}
+
+            out = {
+                "spark_q1": probe("https://query1.finance.yahoo.com" + YAHOO_SPARK_PATH + "?symbols=" + sym + "&range=1y&interval=1wk"),
+                "chart_q2": probe("https://query2.finance.yahoo.com/v8/finance/chart/" + sym + "?range=1y&interval=1wk"),
+                "stooq": probe("https://stooq.com/q/d/l/?s=" + sym.lower() + ".us&i=w"),
+                "stooq_pl": probe("https://stooq.pl/q/d/l/?s=" + sym.lower() + ".us&i=w"),
+            }
+            return self._send_json(out)
+
         if path == "/api/history":
             params = urllib.parse.parse_qs(parsed.query)
             symbols_raw = params.get("symbols", [""])[0]
