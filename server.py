@@ -425,14 +425,9 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception as e:  # noqa: BLE001
                     return {"error": type(e).__name__ + ": " + str(e)[:120]}
 
-            to_t = int(time.time())
-            from_t = to_t - 375 * 86400
-            fh = "https://finnhub.io/api/v1/stock/candle?symbol=" + sym + "&resolution=W&from=" + str(from_t) + "&to=" + str(to_t) + "&token=" + (FINNHUB_API_KEY or "")
             out = {
-                "chart_q2": probe("https://query2.finance.yahoo.com/v8/finance/chart/" + sym + "?range=1y&interval=1wk"),
-                "stooq": probe("https://stooq.com/q/d/l/?s=" + sym.lower() + ".us&i=w"),
-                "finnhub_candle": probe(fh),
-                "finnhub_has_key": bool(FINNHUB_API_KEY),
+                "twelvedata_demo": probe("https://api.twelvedata.com/time_series?symbol=AAPL&interval=1week&outputsize=5&apikey=demo"),
+                "fmp_demo": probe("https://financialmodelingprep.com/api/v3/historical-price-full/AAPL?apikey=demo&serietype=line"),
             }
             return self._send_json(out)
 
