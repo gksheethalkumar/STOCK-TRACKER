@@ -142,10 +142,19 @@ function render() {
   }
 }
 
+function yahooUrl(symbol) {
+  return "https://finance.yahoo.com/quote/" + encodeURIComponent(symbol);
+}
+
 function renderRow(h, value, dc) {
   const li = document.createElement("li");
   li.className = "row";
-  li.addEventListener("click", () => openModal(h));
+  // Tapping a row opens the ticker on Yahoo Finance. Manual-only holdings
+  // (CUSIPs, warrants, delisted) have no Yahoo page, so tapping edits instead.
+  li.addEventListener("click", () => {
+    if (h.manual) { openModal(h); return; }
+    window.open(yahooUrl(h.symbol), "_blank", "noopener,noreferrer");
+  });
 
   const price = effectivePrice(h);
   const stale = isStale(h);
@@ -173,7 +182,11 @@ function renderRow(h, value, dc) {
     <div class="row-val">
       <div class="v">${fmtMoney(value, 0)}</div>
       <div class="w">${(value ? (value / currentTotal() * 100) : 0).toFixed(1)}%</div>
-    </div>`;
+    </div>
+    <button class="edit-btn" aria-label="Edit ${escapeHtml(h.symbol)}" title="Edit">✎</button>`;
+  // The pencil edits the holding; stop propagation so it doesn't also open Yahoo.
+  const editBtn = li.querySelector(".edit-btn");
+  if (editBtn) editBtn.addEventListener("click", (e) => { e.stopPropagation(); openModal(h); });
   return li;
 }
 

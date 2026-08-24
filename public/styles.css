@@ -103,7 +103,7 @@ main { padding: 0 12px calc(var(--safe-bottom) + 24px); max-width: 720px; margin
 
 .list-head {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: 1fr auto auto 30px;
   gap: 12px;
   padding: 14px 12px 8px;
   font-size: 11px;
@@ -118,7 +118,7 @@ main { padding: 0 12px calc(var(--safe-bottom) + 24px); max-width: 720px; margin
 
 .row {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: 1fr auto auto 30px;
   gap: 12px;
   align-items: center;
   padding: 12px;
@@ -130,6 +130,20 @@ main { padding: 0 12px calc(var(--safe-bottom) + 24px); max-width: 720px; margin
   transition: background 0.15s ease, border 0.15s ease;
 }
 .row:active { background: var(--bg-elev-2); border-color: var(--line); }
+
+.edit-btn {
+  justify-self: end;
+  width: 30px; height: 30px;
+  border: 1px solid var(--line);
+  background: var(--bg-elev-2);
+  color: var(--muted);
+  border-radius: 8px;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  transition: transform 0.06s ease, color 0.15s ease, background 0.15s ease;
+}
+.edit-btn:active { transform: scale(0.9); color: var(--text); background: var(--line); }
 
 .row-main { min-width: 0; }
 .row-sym {
