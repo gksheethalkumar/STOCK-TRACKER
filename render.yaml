@@ -24,9 +24,14 @@ services:
         value: "60"
       - key: MAX_WORKERS
         value: "6"
-      # How many of your largest holdings to pull history for (free Twelve Data
-      # tier allows ~8 calls/min). The rest are extrapolated from this basket.
+      # How many of your largest holdings to pull history for. Kept at 6 so a
+      # single fetch stays under Twelve Data's free ~8-calls/min cap; the rest of
+      # the portfolio is extrapolated from this basket.
       - key: HISTORY_MAX_SYMBOLS
-        value: "8"
+        value: "6"
+      # History is daily data and the app also caches it on-device for 2 days,
+      # so refetches are rare (keeps us well within the free daily quota).
+      - key: HISTORY_TTL
+        value: "172800"
       - key: PYTHON_VERSION
         value: "3.12.5"

@@ -213,14 +213,16 @@ def fetch_quotes(symbols):
 # basket up to represent the whole portfolio (client-side).
 TWELVEDATA_API_KEY = os.environ.get("TWELVEDATA_API_KEY", "").strip()
 TWELVEDATA_URL = "https://api.twelvedata.com/time_series"
-HISTORY_TTL = int(os.environ.get("HISTORY_TTL", "1800"))          # 30 min
-HISTORY_MAX_SYMBOLS = int(os.environ.get("HISTORY_MAX_SYMBOLS", "8"))
-# range -> (Twelve Data interval, number of points to request)
+HISTORY_TTL = int(os.environ.get("HISTORY_TTL", "172800"))        # 2 days (daily data)
+HISTORY_MAX_SYMBOLS = int(os.environ.get("HISTORY_MAX_SYMBOLS", "6"))
+# We only fetch two datasets per symbol and slice them client-side:
+#   "base" = daily closes (~15 months) -> serves 1W/10D/1M/3M/6M/1Y
+#   "max"  = monthly closes (~11 years) -> serves All
+# This keeps us to 1-2 Twelve Data calls total instead of one per range,
+# which matters a lot on the free 8-calls/min tier.
+# key -> (Twelve Data interval, number of points to request)
 RANGE_TD = {
-    "1mo": ("1day", 23),
-    "3mo": ("1day", 66),
-    "6mo": ("1day", 130),
-    "1y": ("1week", 54),
+    "base": ("1day", 320),
     "max": ("1month", 130),
 }
 _history_cache = {}       # (symbol, range) -> (ts, {"t":[],"c":[]})
@@ -242,8 +244,10 @@ def _td_parse_series(obj):
         ds, close = v.get("datetime"), v.get("close")
         if not ds or close is None:
             continue
+        # Intraday points are "YYYY-MM-DD HH:MM:SS"; daily/weekly are "YYYY-MM-DD".
+        fmt = "%Y-%m-%d %H:%M:%S" if len(ds) > 10 else "%Y-%m-%d"
         try:
-            ts = int(time.mktime(time.strptime(ds[:10], "%Y-%m-%d")))
+            ts = int(time.mktime(time.strptime(ds, fmt)))
             t.append(ts)
             c.append(float(close))
         except (ValueError, OverflowError):
@@ -253,7 +257,7 @@ def _td_parse_series(obj):
 
 def _td_fetch(symbols, rng):
     """Batched Twelve Data time_series. Returns {symbol: {"t":[],"c":[]}}."""
-    interval, outsize = RANGE_TD.get(rng, RANGE_TD["1y"])
+    interval, outsize = RANGE_TD.get(rng, RANGE_TD["base"])
     qs = urllib.parse.urlencode({
         "symbol": ",".join(symbols),
         "interval": interval,
@@ -365,9 +369,9 @@ class Handler(BaseHTTPRequestHandler):
             params = urllib.parse.parse_qs(parsed.query)
             symbols_raw = params.get("symbols", [""])[0]
             symbols = symbols_raw.split(",") if symbols_raw else []
-            rng = (params.get("range", ["1y"])[0] or "1y").lower()
+            rng = (params.get("range", ["base"])[0] or "base").lower()
             if rng not in RANGE_TD:
-                rng = "1y"
+                rng = "base"
             data = fetch_history(symbols, rng)
             data["fetchedAt"] = int(time.time())
             return self._send_json(data)

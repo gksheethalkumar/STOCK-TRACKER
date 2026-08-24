@@ -245,16 +245,82 @@ function setMarketState() {
 }
 
 // ---------- growth chart ----------
-const HISTORY = { range: "1y", cache: {} };
+// We fetch just two datasets ("base" = daily, "max" = monthly) and derive every
+// range from them by slicing, so switching ranges costs no extra API calls.
+const HISTORY = { range: "1y", base: null, max: null, retries: {} };
 
 const RANGE_LABELS = {
-  "1mo": "past month", "3mo": "past 3 months", "6mo": "past 6 months",
-  "1y": "past year", "max": "since inception",
+  "1w": "past week", "10d": "past 10 days", "1mo": "past month",
+  "3mo": "past 3 months", "6mo": "past 6 months", "1y": "past year",
+  "max": "since inception",
+};
+// How many trailing daily points each range slices from the "base" dataset.
+const RANGE_POINTS = {
+  "1w": 5, "10d": 8, "1mo": 22, "3mo": 65, "6mo": 130, "1y": 260,
 };
 
+// On-device cache so the chart pulls fresh data only every couple of days,
+// keeping us well within Twelve Data's free per-minute / per-day limits.
+const HIST_STORE_KEY = "stocktracker.history.v1";
+const HIST_MAX_AGE_MS = 2 * 24 * 60 * 60 * 1000; // 2 days
+
+function loadHistStore() {
+  try { return JSON.parse(localStorage.getItem(HIST_STORE_KEY)) || {}; } catch (e) { return {}; }
+}
+function saveHistStore(store) {
+  try { localStorage.setItem(HIST_STORE_KEY, JSON.stringify(store)); } catch (e) { /* ignore quota */ }
+}
+
+function topSymbols() {
+  return [...new Set(
+    holdings
+      .filter((h) => !h.manual)
+      .map((h) => ({ sym: h.symbol, val: effectivePrice(h) * h.shares }))
+      .sort((a, b) => b.val - a.val)
+      .map((x) => x.sym)
+  )];
+}
+
 function invalidateChart() {
-  HISTORY.cache = {};
+  HISTORY.base = null;
+  HISTORY.max = null;
+  HISTORY.retries = {};
+  saveHistStore({}); // holdings changed -> force a fresh pull
   loadChart(HISTORY.range);
+}
+
+function sliceData(data, n) {
+  const len = data.timeline.length;
+  const start = Math.max(0, len - n);
+  const series = {};
+  for (const k in data.series) series[k] = data.series[k].slice(start);
+  return { ...data, timeline: data.timeline.slice(start), series };
+}
+
+async function fetchDataset(kind) {
+  const sig = topSymbols().join(",");
+
+  // 1) Reuse on-device cache if it's fresh and for the same holdings.
+  const store = loadHistStore();
+  const entry = store[kind];
+  if (entry && entry.sig === sig && (Date.now() - entry.at) < HIST_MAX_AGE_MS &&
+      entry.data && (entry.data.timeline || []).length >= 2) {
+    HISTORY[kind] = entry.data;
+    return entry.data;
+  }
+
+  // 2) Otherwise fetch from the server.
+  const url = `/api/history?range=${kind}&symbols=${encodeURIComponent(sig)}`;
+  const res = await fetch(url, { cache: "no-store" });
+  const data = await res.json();
+  if ((data && data.error) || (data.timeline || []).length >= 2) {
+    HISTORY[kind] = data;
+    if (!data.error && (data.timeline || []).length >= 2) {
+      store[kind] = { at: Date.now(), sig, data };
+      saveHistStore(store);
+    }
+  }
+  return data;
 }
 
 async function loadChart(range) {
@@ -264,22 +330,22 @@ async function loadChart(range) {
   msg.textContent = "Loading chart…";
   msg.hidden = false;
   try {
-    let data = HISTORY.cache[range];
-    if (!data) {
-      // Send symbols largest-first so the server keeps the most impactful ones.
-      const syms = [...new Set(
-        holdings
-          .filter((h) => !h.manual)
-          .map((h) => ({ sym: h.symbol, val: effectivePrice(h) * h.shares }))
-          .sort((a, b) => b.val - a.val)
-          .map((x) => x.sym)
-      )];
-      const url = `/api/history?range=${encodeURIComponent(range)}&symbols=${encodeURIComponent(syms.join(","))}`;
-      const res = await fetch(url, { cache: "no-store" });
-      data = await res.json();
-      HISTORY.cache[range] = data;
+    const kind = range === "max" ? "max" : "base";
+    let data = HISTORY[kind] || (await fetchDataset(kind));
+    const ok = data && !data.error && (data.timeline || []).length >= 2;
+    if (ok && kind === "base") data = sliceData(data, RANGE_POINTS[range] || 260);
+    renderChart(data, range);
+
+    // If it came back empty (free-tier rate limit), retry a couple of times.
+    if (data && !data.error && (data.timeline || []).length < 2) {
+      const n = (HISTORY.retries[kind] || 0);
+      if (n < 3) {
+        HISTORY.retries[kind] = n + 1;
+        setTimeout(() => { if (HISTORY.range === range) loadChart(range); }, 12000);
+      }
+    } else {
+      HISTORY.retries[kind] = 0;
     }
-    renderChart(data);
   } catch (e) {
     document.getElementById("chart-svg").innerHTML = "";
     msg.textContent = "Chart unavailable right now.";
@@ -322,23 +388,32 @@ function portfolioSeries(data) {
   return { timeline, values, estimated };
 }
 
-function renderChart(data) {
+function renderChart(data, uiRange) {
   const svg = document.getElementById("chart-svg");
   const msg = document.getElementById("chart-msg");
-  if (data && data.error === "no_key") {
+  const clearHeader = () => {
     svg.innerHTML = "";
     document.getElementById("chart-change").textContent = "—";
     document.getElementById("chart-change").className = "chart-change neutral";
     document.getElementById("chart-range-label").textContent = "";
     document.getElementById("chart-start").textContent = "";
     document.getElementById("chart-end").textContent = "";
+  };
+  if (data && data.error === "no_key") {
+    clearHeader();
     msg.textContent = "Add a free Twelve Data API key to enable the growth chart.";
+    msg.hidden = false;
+    return;
+  }
+  if (!data || (data.timeline || []).length < 2) {
+    clearHeader();
+    msg.textContent = "History is warming up… retrying shortly.";
     msg.hidden = false;
     return;
   }
   const ps = portfolioSeries(data);
   if (!ps) {
-    svg.innerHTML = "";
+    clearHeader();
     msg.textContent = "Not enough history yet.";
     msg.hidden = false;
     return;
@@ -378,9 +453,9 @@ function renderChart(data) {
   el.textContent = `${sign}$${Math.abs(chg).toLocaleString("en-US", { maximumFractionDigits: 0 })} (${sign}${Math.abs(pct).toFixed(1)}%)`;
   el.className = "chart-change " + (chg > 0 ? "up" : chg < 0 ? "down" : "neutral");
   document.getElementById("chart-range-label").textContent =
-    (RANGE_LABELS[data.range] || "") + (ps.estimated ? " · estimate" : "");
+    (RANGE_LABELS[uiRange] || "") + (ps.estimated ? " · estimate" : "");
 
-  const withYear = data.range === "1y" || data.range === "max";
+  const withYear = uiRange === "1y" || uiRange === "max";
   const fmtD = (t) => new Date(t * 1000).toLocaleDateString("en-US",
     { month: "short", day: "numeric", ...(withYear ? { year: "2-digit" } : {}) });
   document.getElementById("chart-start").textContent = fmtD(timeline[0]);

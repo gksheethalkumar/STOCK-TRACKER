@@ -54,6 +54,9 @@ git push -u origin main
 2. **New +** → **Blueprint** → select your `STOCK-TRACKER` repo.
    Render reads `render.yaml` automatically.
 3. When prompted for env vars, set **`FINNHUB_API_KEY`** to the key from step 1.
+   Optionally set **`TWELVEDATA_API_KEY`** (free key from
+   <https://twelvedata.com> → Sign up) to enable the **growth chart**. Without
+   it, quotes/net worth still work and the chart just shows an "add a key" note.
 4. Click **Apply / Create**. After it builds you'll get a public URL like
    `https://stock-tracker-xxxx.onrender.com`.
 
@@ -127,6 +130,9 @@ the refresh pressure with `MAX_WORKERS=2 ./run.sh`.
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `FINNHUB_API_KEY` | _(none)_ | If set, use Finnhub for prices (Yahoo fallback). Set this as a secret on Render. |
+| `TWELVEDATA_API_KEY` | _(none)_ | If set, enables the portfolio growth chart (historical prices). Free key from twelvedata.com. Set as a secret on Render. |
+| `HISTORY_MAX_SYMBOLS` | `6` | How many of your largest holdings to pull history for (kept under the free ≈8 calls/min cap); the rest are extrapolated from that basket. |
+| `HISTORY_TTL` | `172800` | Seconds history is cached server-side (app also caches on-device 2 days → refetches are rare). |
 | `PORT` | `8000` | Port to serve on (Render sets this automatically) |
 | `HOST` | `0.0.0.0` | Bind address (all interfaces, so the iPhone can reach it) |
 | `CACHE_TTL` | `12` | Seconds a quote is reused before refetching (Render uses `30`) |
