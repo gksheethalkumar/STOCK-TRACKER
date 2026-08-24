@@ -266,7 +266,14 @@ async function loadChart(range) {
   try {
     let data = HISTORY.cache[range];
     if (!data) {
-      const syms = [...new Set(holdings.filter((h) => !h.manual).map((h) => h.symbol))];
+      // Send symbols largest-first so the server keeps the most impactful ones.
+      const syms = [...new Set(
+        holdings
+          .filter((h) => !h.manual)
+          .map((h) => ({ sym: h.symbol, val: effectivePrice(h) * h.shares }))
+          .sort((a, b) => b.val - a.val)
+          .map((x) => x.sym)
+      )];
       const url = `/api/history?range=${encodeURIComponent(range)}&symbols=${encodeURIComponent(syms.join(","))}`;
       const res = await fetch(url, { cache: "no-store" });
       data = await res.json();
@@ -286,29 +293,49 @@ function updateRangeTabs() {
   });
 }
 
-// Reconstruct portfolio value over time = sum(shares x historical close).
-// Manual holdings and any symbol without history contribute a flat line at
-// their current value, so the total is always complete.
+// Reconstruct portfolio value over time from the tracked (largest) holdings,
+// then scale that basket up to the whole portfolio's current value so the curve
+// represents overall net worth even though we only pull history for a few names.
 function portfolioSeries(data) {
   const timeline = data.timeline || [];
   const series = data.series || {};
   if (timeline.length < 2) return null;
+
   const values = new Array(timeline.length).fill(0);
+  let trackedCurrent = 0;
+  let totalCurrent = 0;
   for (const h of holdings) {
+    const current = effectivePrice(h) * h.shares;
+    totalCurrent += current;
     const s = !h.manual ? series[h.symbol] : null;
     if (s) {
+      trackedCurrent += current;
       for (let i = 0; i < timeline.length; i++) values[i] += (s[i] || 0) * h.shares;
-    } else {
-      const flat = effectivePrice(h) * h.shares;
-      for (let i = 0; i < timeline.length; i++) values[i] += flat;
     }
   }
-  return { timeline, values };
+  if (trackedCurrent <= 0) return null;
+
+  const scale = totalCurrent / trackedCurrent;   // extrapolate to full portfolio
+  for (let i = 0; i < timeline.length; i++) values[i] *= scale;
+  const trackedCount = Object.keys(series).length;
+  const estimated = trackedCount < holdings.filter((h) => !h.manual).length;
+  return { timeline, values, estimated };
 }
 
 function renderChart(data) {
   const svg = document.getElementById("chart-svg");
   const msg = document.getElementById("chart-msg");
+  if (data && data.error === "no_key") {
+    svg.innerHTML = "";
+    document.getElementById("chart-change").textContent = "—";
+    document.getElementById("chart-change").className = "chart-change neutral";
+    document.getElementById("chart-range-label").textContent = "";
+    document.getElementById("chart-start").textContent = "";
+    document.getElementById("chart-end").textContent = "";
+    msg.textContent = "Add a free Twelve Data API key to enable the growth chart.";
+    msg.hidden = false;
+    return;
+  }
   const ps = portfolioSeries(data);
   if (!ps) {
     svg.innerHTML = "";
@@ -350,7 +377,8 @@ function renderChart(data) {
   const sign = chg >= 0 ? "+" : "−";
   el.textContent = `${sign}$${Math.abs(chg).toLocaleString("en-US", { maximumFractionDigits: 0 })} (${sign}${Math.abs(pct).toFixed(1)}%)`;
   el.className = "chart-change " + (chg > 0 ? "up" : chg < 0 ? "down" : "neutral");
-  document.getElementById("chart-range-label").textContent = RANGE_LABELS[data.range] || "";
+  document.getElementById("chart-range-label").textContent =
+    (RANGE_LABELS[data.range] || "") + (ps.estimated ? " · estimate" : "");
 
   const withYear = data.range === "1y" || data.range === "max";
   const fmtD = (t) => new Date(t * 1000).toLocaleDateString("en-US",

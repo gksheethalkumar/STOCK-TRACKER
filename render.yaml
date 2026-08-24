@@ -13,11 +13,20 @@ services:
       # file - you paste it in the dashboard (Environment tab) as a secret.
       - key: FINNHUB_API_KEY
         sync: false
+      # Free Twelve Data key (https://twelvedata.com) powers the growth chart's
+      # historical prices. Paste it in the dashboard as a secret. Without it the
+      # chart shows a "add a key" message; quotes/net worth still work.
+      - key: TWELVEDATA_API_KEY
+        sync: false
       # Reuse quotes for 60s so ~60 tickers stay within Finnhub's free 60/min.
       # Combined with last-known-good fallback, this keeps totals stable.
       - key: CACHE_TTL
         value: "60"
       - key: MAX_WORKERS
         value: "6"
+      # How many of your largest holdings to pull history for (free Twelve Data
+      # tier allows ~8 calls/min). The rest are extrapolated from this basket.
+      - key: HISTORY_MAX_SYMBOLS
+        value: "8"
       - key: PYTHON_VERSION
         value: "3.12.5"

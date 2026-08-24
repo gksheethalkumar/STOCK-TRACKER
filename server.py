@@ -207,159 +207,110 @@ def fetch_quotes(symbols):
 
 
 # ------------------------- Historical series -------------------------
-# Powered by Yahoo's batched "spark" endpoint so we fetch many symbols per
-# request instead of one call each. Results are cached because history barely
-# changes intraday.
-YAHOO_SPARK_PATH = "/v8/finance/spark"
-HISTORY_TTL = int(os.environ.get("HISTORY_TTL", "1800"))   # 30 min
-SPARK_BATCH = 25
-# Sensible interval per range to keep payloads small.
-RANGE_INTERVAL = {
-    "1mo": "1d", "3mo": "1d", "6mo": "1d",
-    "1y": "1wk", "2y": "1wk", "5y": "1mo", "max": "1mo",
+# Free scrapers (Yahoo, Stooq) are IP-blocked from data-center hosts like
+# Render, so history uses Twelve Data (free key, works server-side). The free
+# tier allows ~8 calls/min, so we only pull the largest holdings and scale that
+# basket up to represent the whole portfolio (client-side).
+TWELVEDATA_API_KEY = os.environ.get("TWELVEDATA_API_KEY", "").strip()
+TWELVEDATA_URL = "https://api.twelvedata.com/time_series"
+HISTORY_TTL = int(os.environ.get("HISTORY_TTL", "1800"))          # 30 min
+HISTORY_MAX_SYMBOLS = int(os.environ.get("HISTORY_MAX_SYMBOLS", "8"))
+# range -> (Twelve Data interval, number of points to request)
+RANGE_TD = {
+    "1mo": ("1day", 23),
+    "3mo": ("1day", 66),
+    "6mo": ("1day", 130),
+    "1y": ("1week", 54),
+    "max": ("1month", 130),
 }
-_history_cache = {}       # (symbol, range, interval) -> (ts, {"t":[],"c":[]})
-_history_good = {}        # (symbol, range, interval) -> {"t":[],"c":[]}
+_history_cache = {}       # (symbol, range) -> (ts, {"t":[],"c":[]})
+_history_good = {}        # (symbol, range) -> {"t":[],"c":[]}
 
 
-RANGE_SECONDS = {
-    "1mo": 34 * 86400, "3mo": 96 * 86400, "6mo": 190 * 86400,
-    "1y": 375 * 86400, "max": 20 * 365 * 86400,
-}
-STOOQ_INTERVAL = {"1mo": "d", "3mo": "d", "6mo": "d", "1y": "w", "max": "m"}
-
-
-def _http_text(url, timeout=12):
+def _http_text(url, timeout=15):
     req = urllib.request.Request(url, headers=BASE_HEADERS)
     with urllib.request.urlopen(req, timeout=timeout, context=_ssl_ctx) as resp:
         return resp.read().decode("utf-8", "replace")
 
 
-def _spark_fetch(symbols, rng, interval):
-    """Batched Yahoo spark endpoint. Returns {symbol: {"t":[],"c":[]}}."""
+def _td_parse_series(obj):
+    """Turn one Twelve Data symbol object into {"t":[...],"c":[...]} (ascending)."""
+    if not isinstance(obj, dict) or obj.get("status") != "ok":
+        return None
+    t, c = [], []
+    for v in obj.get("values") or []:
+        ds, close = v.get("datetime"), v.get("close")
+        if not ds or close is None:
+            continue
+        try:
+            ts = int(time.mktime(time.strptime(ds[:10], "%Y-%m-%d")))
+            t.append(ts)
+            c.append(float(close))
+        except (ValueError, OverflowError):
+            continue
+    return {"t": t, "c": c} if t else None
+
+
+def _td_fetch(symbols, rng):
+    """Batched Twelve Data time_series. Returns {symbol: {"t":[],"c":[]}}."""
+    interval, outsize = RANGE_TD.get(rng, RANGE_TD["1y"])
     qs = urllib.parse.urlencode({
-        "symbols": ",".join(symbols), "range": rng, "interval": interval,
+        "symbol": ",".join(symbols),
+        "interval": interval,
+        "outputsize": outsize,
+        "order": "ASC",
+        "apikey": TWELVEDATA_API_KEY,
     })
-    for host in YAHOO_HOSTS:
-        url = "https://" + host + YAHOO_SPARK_PATH + "?" + qs
-        try:
-            payload = json.loads(_http_text(url))
-            results = (payload.get("spark") or {}).get("result") or []
-            out = {}
-            for item in results:
-                sym = (item.get("symbol") or "").upper()
-                resp_list = item.get("response") or []
-                if not resp_list:
-                    continue
-                r0 = resp_list[0]
-                ts = r0.get("timestamp") or []
-                closes = (((r0.get("indicators") or {}).get("quote") or [{}])[0]).get("close") or []
-                pairs = [(int(t), c) for t, c in zip(ts, closes) if c is not None]
-                if pairs:
-                    out[sym] = {"t": [p[0] for p in pairs], "c": [p[1] for p in pairs]}
-            if out:
-                return out
-        except Exception:  # noqa: BLE001
-            pass
-    return {}
-
-
-def _yahoo_chart_history(symbol, rng, interval):
-    qs = urllib.parse.urlencode({"range": rng, "interval": interval})
-    for host in YAHOO_HOSTS:
-        url = "https://" + host + "/v8/finance/chart/" + symbol + "?" + qs
-        try:
-            payload = json.loads(_http_text(url))
-            res = (payload.get("chart") or {}).get("result") or []
-            if not res:
-                continue
-            r0 = res[0]
-            ts = r0.get("timestamp") or []
-            closes = (((r0.get("indicators") or {}).get("quote") or [{}])[0]).get("close") or []
-            pairs = [(int(t), c) for t, c in zip(ts, closes) if c is not None]
-            if pairs:
-                return {"t": [p[0] for p in pairs], "c": [p[1] for p in pairs]}
-        except Exception:  # noqa: BLE001
-            pass
-    return None
-
-
-def _stooq_history(symbol, rng):
-    interval = STOOQ_INTERVAL.get(rng, "w")
-    cutoff = time.time() - RANGE_SECONDS.get(rng, RANGE_SECONDS["1y"])
-    url = "https://stooq.com/q/d/l/?s=" + symbol.lower() + ".us&i=" + interval
     try:
-        text = _http_text(url)
-        lines = [ln for ln in text.strip().split("\n") if ln]
-        if len(lines) < 2 or not lines[0].lower().startswith("date"):
-            return None
-        t, c = [], []
-        for ln in lines[1:]:
-            parts = ln.split(",")
-            if len(parts) < 5:
-                continue
-            try:
-                ts = int(time.mktime(time.strptime(parts[0], "%Y-%m-%d")))
-                close = float(parts[4])
-            except (ValueError, OverflowError):
-                continue
-            if ts >= cutoff:
-                t.append(ts)
-                c.append(close)
-        if t:
-            return {"t": t, "c": c}
+        payload = json.loads(_http_text(TWELVEDATA_URL + "?" + qs))
     except Exception:  # noqa: BLE001
-        pass
-    return None
-
-
-def _history_one(symbol, rng, interval):
-    """Yahoo chart first, then Stooq. Used for spark misses."""
-    return _yahoo_chart_history(symbol, rng, interval) or _stooq_history(symbol, rng)
+        return {}
+    out = {}
+    # Single-symbol responses are the series object directly; multi-symbol
+    # responses are keyed by symbol.
+    if "values" in payload or payload.get("status") == "error":
+        if len(symbols) == 1:
+            s = _td_parse_series(payload)
+            if s:
+                out[symbols[0]] = s
+        return out
+    for sym in symbols:
+        s = _td_parse_series(payload.get(sym))
+        if s:
+            out[sym] = s
+    return out
 
 
 def fetch_history(symbols, rng):
-    interval = RANGE_INTERVAL.get(rng, "1wk")
+    if rng not in RANGE_TD:
+        rng = "1y"
+    # Client sends symbols largest-first; keep only the top few for the free tier.
     symbols = [s for s in dict.fromkeys(s.strip().upper() for s in symbols) if s]
+    symbols = symbols[:HISTORY_MAX_SYMBOLS]
+
+    if not TWELVEDATA_API_KEY:
+        return {"timeline": [], "series": {}, "range": rng, "error": "no_key"}
     if not symbols:
-        return {"timeline": [], "series": {}, "range": rng, "interval": interval}
+        return {"timeline": [], "series": {}, "range": rng}
 
     now = time.time()
-    resolved = {}   # symbol -> {"t","c"}
-    need = []
+    resolved, need = {}, []
     for s in symbols:
-        key = (s, rng, interval)
-        c = _history_cache.get(key)
+        c = _history_cache.get((s, rng))
         if c and now - c[0] < HISTORY_TTL:
             resolved[s] = c[1]
         else:
             need.append(s)
 
-    def _store(sym, data):
-        key = (sym, rng, interval)
-        if data:
-            _history_cache[key] = (now, data)
-            _history_good[key] = data
-            resolved[sym] = data
-        elif key in _history_good:      # serve last good on failure
-            resolved[sym] = _history_good[key]
-
-    # 1) Try the cheap batched spark call first.
-    still = []
-    for i in range(0, len(need), SPARK_BATCH):
-        batch = need[i:i + SPARK_BATCH]
-        got = _spark_fetch(batch, rng, interval)
-        for s in batch:
+    if need:
+        got = _td_fetch(need, rng)
+        for s in need:
             if s in got:
-                _store(s, got[s])
-            else:
-                still.append(s)
-
-    # 2) Fill remaining symbols concurrently via chart -> Stooq fallback.
-    if still:
-        with ThreadPoolExecutor(max_workers=min(MAX_WORKERS, len(still))) as pool:
-            for s, data in zip(still, pool.map(lambda x: _history_one(x, rng, interval), still)):
-                _store(s, data)
+                _history_cache[(s, rng)] = (now, got[s])
+                _history_good[(s, rng)] = got[s]
+                resolved[s] = got[s]
+            elif (s, rng) in _history_good:      # serve last good on failure
+                resolved[s] = _history_good[(s, rng)]
 
     # Build a unified timeline (union of all timestamps) and forward-fill.
     all_ts = sorted({t for v in resolved.values() for t in v["t"]})
@@ -375,8 +326,8 @@ def fetch_history(symbols, rng):
         series[s] = [x if x is not None else first_known for x in aligned]
 
     return {
-        "timeline": all_ts, "series": series, "range": rng, "interval": interval,
-        "_debug": {"requested": len(symbols), "resolved": len(resolved)},
+        "timeline": all_ts, "series": series, "range": rng,
+        "tracked": sorted(series.keys()),
     }
 
 
@@ -410,33 +361,12 @@ class Handler(BaseHTTPRequestHandler):
             quotes = fetch_quotes(symbols)
             return self._send_json({"quotes": quotes, "fetchedAt": int(time.time())})
 
-        if path == "/api/histdebug":
-            params = urllib.parse.parse_qs(parsed.query)
-            sym = (params.get("symbol", ["AAPL"])[0] or "AAPL").upper()
-
-            def probe(url):
-                try:
-                    req = urllib.request.Request(url, headers=BASE_HEADERS)
-                    with urllib.request.urlopen(req, timeout=12, context=_ssl_ctx) as r:
-                        body = r.read().decode("utf-8", "replace")
-                    return {"code": r.getcode(), "len": len(body), "head": body[:160]}
-                except urllib.error.HTTPError as e:
-                    return {"error": "HTTP " + str(e.code)}
-                except Exception as e:  # noqa: BLE001
-                    return {"error": type(e).__name__ + ": " + str(e)[:120]}
-
-            out = {
-                "twelvedata_demo": probe("https://api.twelvedata.com/time_series?symbol=AAPL&interval=1week&outputsize=5&apikey=demo"),
-                "fmp_demo": probe("https://financialmodelingprep.com/api/v3/historical-price-full/AAPL?apikey=demo&serietype=line"),
-            }
-            return self._send_json(out)
-
         if path == "/api/history":
             params = urllib.parse.parse_qs(parsed.query)
             symbols_raw = params.get("symbols", [""])[0]
             symbols = symbols_raw.split(",") if symbols_raw else []
             rng = (params.get("range", ["1y"])[0] or "1y").lower()
-            if rng not in RANGE_INTERVAL:
+            if rng not in RANGE_TD:
                 rng = "1y"
             data = fetch_history(symbols, rng)
             data["fetchedAt"] = int(time.time())
