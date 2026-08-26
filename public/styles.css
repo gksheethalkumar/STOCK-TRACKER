@@ -62,13 +62,33 @@ body { min-height: 100vh; }
   100% { box-shadow: 0 0 0 0 rgba(46,194,107,0); }
 }
 
+.networth-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0 2px;
+}
 .networth {
   font-size: 40px;
   font-weight: 700;
   letter-spacing: -0.02em;
-  margin: 6px 0 2px;
   font-variant-numeric: tabular-nums;
 }
+.eye-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.eye-btn:active { transform: scale(0.92); }
+.eye-btn svg { display: block; }
 
 .day-change {
   font-size: 15px;

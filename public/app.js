@@ -11,6 +11,58 @@ let quotes = {};          // symbol -> { price, previousClose, ... }
 let editingId = null;
 let refreshTimer = null;
 
+// Net worth is hidden by default for shoulder-surfing privacy; the choice is
+// remembered per device. We keep the last computed totals so the eye toggle can
+// mask/unmask instantly without recomputing.
+const NET_HIDDEN_KEY = "stocktracker.netHidden.v1";
+const NET_MASK = "••••••";
+let netHidden = loadNetHidden();
+let lastSummary = { total: 0, dayAbs: 0, prevTotal: 0 };
+
+function loadNetHidden() {
+  try {
+    const v = localStorage.getItem(NET_HIDDEN_KEY);
+    return v === null ? true : v === "1"; // default hidden
+  } catch (e) { return true; }
+}
+function saveNetHidden() {
+  try { localStorage.setItem(NET_HIDDEN_KEY, netHidden ? "1" : "0"); } catch (e) {}
+}
+
+const ICON_EYE =
+  '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>';
+const ICON_EYE_OFF =
+  '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+
+function updateHideBtn() {
+  const btn = document.getElementById("hide-btn");
+  if (!btn) return;
+  btn.innerHTML = netHidden ? ICON_EYE_OFF : ICON_EYE;
+  const label = netHidden ? "Show net worth" : "Hide net worth";
+  btn.setAttribute("aria-label", label);
+  btn.title = label;
+}
+
+function updateSummaryDisplay() {
+  const netEl = document.getElementById("networth");
+  const dayEl = document.getElementById("day-change");
+  if (netHidden) {
+    netEl.textContent = NET_MASK;
+    dayEl.textContent = NET_MASK;
+    dayEl.className = "day-change neutral";
+    return;
+  }
+  netEl.textContent = fmtMoney(lastSummary.total, 0);
+  if (lastSummary.prevTotal > 0) {
+    const pct = (lastSummary.dayAbs / lastSummary.prevTotal) * 100;
+    dayEl.textContent = `${fmtSigned(lastSummary.dayAbs)}  (${lastSummary.dayAbs >= 0 ? "+" : "−"}${Math.abs(pct).toFixed(2)}%) today`;
+    dayEl.className = "day-change " + (lastSummary.dayAbs > 0 ? "up" : lastSummary.dayAbs < 0 ? "down" : "neutral");
+  } else {
+    dayEl.textContent = "Day change unavailable";
+    dayEl.className = "day-change neutral";
+  }
+}
+
 // ---------- persistence ----------
 function loadHoldings() {
   try {
@@ -129,17 +181,8 @@ function render() {
     list.appendChild(renderRow(h, value, dc));
   }
 
-  document.getElementById("networth").textContent = fmtMoney(total, 0);
-
-  const dayEl = document.getElementById("day-change");
-  if (prevTotal > 0) {
-    const pct = (dayAbs / prevTotal) * 100;
-    dayEl.textContent = `${fmtSigned(dayAbs)}  (${dayAbs >= 0 ? "+" : "−"}${Math.abs(pct).toFixed(2)}%) today`;
-    dayEl.className = "day-change " + (dayAbs > 0 ? "up" : dayAbs < 0 ? "down" : "neutral");
-  } else {
-    dayEl.textContent = "Day change unavailable";
-    dayEl.className = "day-change neutral";
-  }
+  lastSummary = { total, dayAbs, prevTotal };
+  updateSummaryDisplay();
 }
 
 function yahooUrl(symbol) {
@@ -552,6 +595,13 @@ document.getElementById("range-tabs").addEventListener("click", (e) => {
   if (btn) loadChart(btn.dataset.range);
 });
 
+document.getElementById("hide-btn").addEventListener("click", () => {
+  netHidden = !netHidden;
+  saveNetHidden();
+  updateHideBtn();
+  updateSummaryDisplay();
+});
+
 // Refresh when the app regains focus (e.g. reopened from home screen)
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) refresh();
@@ -563,6 +613,7 @@ function startAutoRefresh() {
 }
 
 // ---------- boot ----------
+updateHideBtn();
 holdings = loadHoldings();
 render();
 refresh();
