@@ -78,6 +78,7 @@ window.SEED_HOLDINGS = [
 
 // E*TRADE account (-7865) — 2026-10-23 screenshots.
 window.SEED_ETRADE = [
+  { symbol: "CSCO", shares: 1705, price: 109.0 },   // 2266 total − 561 in Schwab
   { symbol: "AMZN", shares: 47.352, price: 250.50 },
   { symbol: "AVGO", shares: 14.436, price: 323.40 },
   { symbol: "BE", shares: 26.677, price: 218.15 },
@@ -149,9 +150,7 @@ window.SEED_ROBINHOOD = [
 
 // Schwab — 2026-10-22 screenshots.
 window.SEED_SCHWAB = [
-  // CSCO wasn't in the current screenshots; kept at its old count per user.
-  // Lives here only so it's included in the Total — move if it's elsewhere.
-  { symbol: "CSCO", shares: 2266, price: 109.0 },
+  { symbol: "CSCO", shares: 561, price: 109.0 },   // 306 + 255 lots in Schwab
   { symbol: "AMD", shares: 13, price: 507.93 },
   { symbol: "META", shares: 12, price: 648.85 },
   { symbol: "NVDA", shares: 273, price: 212.21 },
