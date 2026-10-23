@@ -236,16 +236,11 @@ function addAccount() {
 
 // ---------- pricing helpers ----------
 // Effective price for a holding: live quote if available & not manual,
-// otherwise the stored (fallback/manual) price.
-// True while a reference account (the "Old" snapshot) is the active view: its
-// holdings always show their captured prices, never live quotes.
-function viewingReference() {
-  const a = activeAccount();
-  return !!(a && a.reference);
-}
-
+// otherwise the stored (fallback/manual) price. The "Old" reference tab shows
+// its August holdings valued live too (so day change works); its captured
+// prices stay only as an offline fallback (never overwritten in refresh()).
 function effectivePrice(h) {
-  if (!viewingReference() && !h.manual) {
+  if (!h.manual) {
     const q = quotes[h.symbol];
     if (q && typeof q.price === "number") return q.price;
   }
@@ -253,14 +248,14 @@ function effectivePrice(h) {
 }
 
 function isStale(h) {
-  if (h.manual || viewingReference()) return false;
+  if (h.manual) return false;
   const q = quotes[h.symbol];
   return !q || typeof q.price !== "number";
 }
 
 function dayChangeFor(h) {
   // returns { abs, pct } change in *value* for today, or null if unknown
-  if (h.manual || viewingReference()) return null;
+  if (h.manual) return null;
   const q = quotes[h.symbol];
   if (!q || typeof q.price !== "number" || typeof q.previousClose !== "number" || q.previousClose === 0) return null;
   const perShare = q.price - q.previousClose;
