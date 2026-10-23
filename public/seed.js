@@ -66,32 +66,129 @@ window.SEED_HOLDINGS = [
   { symbol: "90118L202", shares: 250000, price: 0.0, manual: true },
 ];
 
-// IMPORTANT: SEED_HOLDINGS above is already the COMBINED total of all three
-// brokerages (Robinhood + Schwab + E*TRADE) as of the 2026-08-20 snapshot.
+// SEED_HOLDINGS above is the OLD combined snapshot (all three brokerages merged)
+// from 2026-08-20. It is kept only as a read-only "Old" reference tab and is NOT
+// part of the live Total.
 //
-// The 2026-10-23 E*TRADE screenshot (account -7865) is only the E*TRADE slice,
-// most of which is already inside SEED_HOLDINGS. Adding the whole screenshot
-// would double-count. So we only seed the *new money* added to E*TRADE since
-// the old snapshot:
-//   - Brand-new tickers not present in the old total at all.
-//   - Forced increases: symbols whose current E*TRADE share count already
-//     exceeds the entire old combined total, so the surplus must be new
-//     (AMZN 47.352 vs old 20 -> +27.352; GOOGL 54.343 vs old 29.337 -> +25.006).
-// `price` is the E*TRADE Ask at capture time; live quotes replace it.
-//
-// Full E*TRADE screenshot (-7865), kept for future diffing when a new
-// screenshot arrives:
-//   AMZN 47.352, AVGO 14.436, BE 26.677, DRAM 48.635, GOOG 16.294,
-//   GOOGL 54.343, IREN 155.027, META 15.01, MP 100, MSFT 16.029, MU 2,
-//   ORCL 73.565, QCOM 28.08, QQQ 119.558, QQQM 21.021, SCHD 1413.85,
-//   SPCX 60, SPY 39, VOO 14.762, VTI 142.513.
-window.SEED_ETRADE_ADDITIONS = [
+// The live Total is built from three real accounts, each transcribed from the
+// user's current brokerage screenshots (2026-10-22/23). `price` is the quote
+// shown at capture time; live quotes replace it. Positions that cannot be priced
+// live (CUSIPs, delisted shells trading at $0) are marked manual:true so the app
+// uses the captured price instead of showing a broken live lookup.
+
+// E*TRADE account (-7865) — 2026-10-23 screenshots.
+window.SEED_ETRADE = [
+  { symbol: "AMZN", shares: 47.352, price: 250.50 },
   { symbol: "AVGO", shares: 14.436, price: 323.40 },
+  { symbol: "BE", shares: 26.677, price: 218.15 },
+  { symbol: "DRAM", shares: 48.635, price: 45.84 },
   { symbol: "GOOG", shares: 16.294, price: 320.87 },
+  { symbol: "GOOGL", shares: 54.343, price: 324.23 },
+  { symbol: "IREN", shares: 155.027, price: 25.51 },
+  { symbol: "META", shares: 15.01, price: 648.91 },
   { symbol: "MP", shares: 100, price: 38.60 },
+  { symbol: "MSFT", shares: 16.029, price: 521.64 },
   { symbol: "MU", shares: 2, price: 857.02 },
   { symbol: "ORCL", shares: 73.565, price: 125.51 },
   { symbol: "QCOM", shares: 28.08, price: 172.93 },
-  { symbol: "AMZN", shares: 27.352, price: 250.50 },   // E*TRADE 47.352 − old 20
-  { symbol: "GOOGL", shares: 25.006, price: 324.23 },  // E*TRADE 54.343 − old 29.337
+  { symbol: "QQQ", shares: 119.558, price: 704.62 },
+  { symbol: "QQQM", shares: 21.021, price: 290.13 },
+  { symbol: "SCHD", shares: 1413.85, price: 35.40 },
+  { symbol: "SPCX", shares: 60, price: 144.75 },
+  { symbol: "SPY", shares: 39, price: 764.04 },
+  { symbol: "VOO", shares: 14.762, price: 702.31 },
+  { symbol: "VTI", shares: 142.513, price: 375.13 },
+];
+
+// Robinhood — 2026-10-22 screenshots.
+window.SEED_ROBINHOOD = [
+  { symbol: "SPY", shares: 74.90, price: 762.99 },
+  { symbol: "QQQ", shares: 65.13, price: 704.73 },
+  { symbol: "PLTR", shares: 206.17, price: 195.16 },
+  { symbol: "SCHD", shares: 1100, price: 35.32 },
+  { symbol: "META", shares: 20.41, price: 645.09 },
+  { symbol: "AAPL", shares: 32.67, price: 345.87 },
+  { symbol: "VOO", shares: 16.08, price: 701.37 },
+  { symbol: "VTI", shares: 30.06, price: 374.55 },
+  { symbol: "SMCI", shares: 308.44, price: 34.15 },
+  { symbol: "MSFT", shares: 16.61, price: 515.20 },
+  { symbol: "HOOD", shares: 86.69, price: 97.02 },
+  { symbol: "AMZN", shares: 20, price: 249.65 },
+  { symbol: "GME", shares: 80, price: 25.34 },
+  { symbol: "SHIP", shares: 124.88, price: 15.35 },
+  { symbol: "SNOW", shares: 5.36, price: 313.84 },
+  { symbol: "TWLO", shares: 4.52, price: 253.65 },
+  { symbol: "PFE", shares: 29.51, price: 30.35 },
+  { symbol: "BYDDY", shares: 90, price: 8.75 },
+  { symbol: "AMD", shares: 1.08, price: 513.46 },
+  { symbol: "GLBS", shares: 144, price: 3.05 },
+  { symbol: "NU", shares: 26, price: 14.74 },
+  { symbol: "LOGC", shares: 12, price: 15.19 },
+  { symbol: "LCID", shares: 49.42, price: 3.44 },
+  { symbol: "GRCE", shares: 55.17, price: 1.92 },
+  { symbol: "NIO", shares: 29.01, price: 3.37 },
+  { symbol: "CLOV", shares: 7.93, price: 4.70 },
+  { symbol: "USEA", shares: 13.28, price: 2.42 },
+  { symbol: "JFIN", shares: 18.26, price: 1.28 },
+  { symbol: "ABEO", shares: 1.64, price: 4.47 },
+  { symbol: "GME+", shares: 8, price: 0.78, manual: true },
+  { symbol: "NVDA", shares: 0.02892, price: 213.70 },
+  { symbol: "OPK", shares: 2, price: 1.65 },
+  { symbol: "CLRB", shares: 2.27, price: 1.17 },
+  { symbol: "WKHS", shares: 1, price: 2.62 },
+  { symbol: "BRLT", shares: 1.09, price: 1.53 },
+  { symbol: "TOPS", shares: 2.28, price: 0.3358 },
+  { symbol: "AGEN", shares: 0.05, price: 6.51 },
+  { symbol: "ARBK", shares: 0.199074, price: 1.55 },
+  { symbol: "FSRNQ", shares: 30, price: 0.0, manual: true },
+  { symbol: "INKT", shares: 0.00146, price: 10.06 },
+  { symbol: "RUBI", shares: 0.00003, price: 0.1697 },
+  { symbol: "HLTHQ", shares: 15, price: 0.0, manual: true },
+  { symbol: "AABAZZ", shares: 7, price: 0.0, manual: true },
+];
+
+// Schwab — 2026-10-22 screenshots.
+window.SEED_SCHWAB = [
+  // CSCO wasn't in the current screenshots; kept at its old count per user.
+  // Lives here only so it's included in the Total — move if it's elsewhere.
+  { symbol: "CSCO", shares: 2266, price: 109.0 },
+  { symbol: "AMD", shares: 13, price: 507.93 },
+  { symbol: "META", shares: 12, price: 648.85 },
+  { symbol: "NVDA", shares: 273, price: 212.21 },
+  { symbol: "HOOD", shares: 30, price: 96.58 },
+  { symbol: "PLTR", shares: 112, price: 196.19 },
+  { symbol: "SHIP", shares: 39, price: 15.35 },
+  { symbol: "TGT", shares: 18.9731, price: 158.11 },
+  { symbol: "AAPL", shares: 33, price: 348.22 },
+  { symbol: "MSFT", shares: 52.1891, price: 521.08 },
+  { symbol: "SNOW", shares: 7, price: 313.96 },
+  { symbol: "VTRS", shares: 3, price: 18.48 },
+  { symbol: "AAL", shares: 61, price: 12.60 },
+  { symbol: "USEA", shares: 3, price: 2.42 },
+  { symbol: "CAVA", shares: 50, price: 54.68 },
+  { symbol: "PFE", shares: 25, price: 30.42 },
+  { symbol: "DOCU", shares: 5, price: 84.41 },
+  { symbol: "CLOV", shares: 100, price: 4.73 },
+  { symbol: "AHRO", shares: 221000, price: 0.0003 },
+  { symbol: "JFIN", shares: 275, price: 1.28 },
+  { symbol: "HYLN", shares: 46, price: 3.10 },
+  { symbol: "NIO", shares: 400, price: 3.31 },
+  { symbol: "LCID", shares: 12, price: 3.46 },
+  { symbol: "TOON", shares: 10, price: 0.5017 },
+  { symbol: "EWLL", shares: 1999999, price: 0.0, manual: true },
+  { symbol: "NOHO", shares: 999999, price: 0.0, manual: true },
+  { symbol: "KGET", shares: 1999998, price: 0.0, manual: true },
+  { symbol: "SNFI", shares: 2, price: 1.60 },
+  { symbol: "EESO", shares: 999999, price: 0.0, manual: true },
+  { symbol: "STWC", shares: 105000, price: 0.0, manual: true },
+  { symbol: "FTXP", shares: 100000, price: 0.0, manual: true },
+  { symbol: "LBRMF", shares: 2000, price: 0.0002 },
+  { symbol: "040405102", shares: 200000, price: 0.0, manual: true },
+  { symbol: "90118L202", shares: 250000, price: 0.0, manual: true },
+  { symbol: "VTI", shares: 6, price: 374.90 },
+  { symbol: "QQQ", shares: 74.5699, price: 704.47 },
+  { symbol: "VOO", shares: 28.4013, price: 702.30 },
+  { symbol: "QQQI", shares: 241.4795, price: 52.59 },
+  { symbol: "VXUS", shares: 14.2247, price: 82.73 },
+  { symbol: "INDA", shares: 20, price: 47.36 },
 ];

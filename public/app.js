@@ -1,7 +1,7 @@
 "use strict";
 
 const OLD_STORAGE_KEY = "stocktracker.holdings.v1";   // pre-multi-account data
-const ACCOUNTS_KEY = "stocktracker.accounts.v2";      // v2: no E*TRADE double-count
+const ACCOUNTS_KEY = "stocktracker.accounts.v3";      // v3: real per-account data
 const TOTAL_ID = "__total__";
 const REFRESH_MS = 60000; // auto-refresh cadence while the app is open (1 min)
 
@@ -81,36 +81,29 @@ function makeHolding(h) {
   };
 }
 
-const BASE_ACCT = "RH + Schwab + E*TRADE";
-const ADDITIONS_ACCT = "E*TRADE — new buys";
+const ACCT_ROBINHOOD = "Robinhood";
+const ACCT_SCHWAB = "Schwab";
+const ACCT_ETRADE = "E*TRADE";
+const ACCT_OLD = "Old (Aug '26)";
 
 function seedFor(name) {
-  if (name === ADDITIONS_ACCT) return window.SEED_ETRADE_ADDITIONS || [];
-  if (name === BASE_ACCT) return window.SEED_HOLDINGS || [];
+  if (name === ACCT_ROBINHOOD) return window.SEED_ROBINHOOD || [];
+  if (name === ACCT_SCHWAB) return window.SEED_SCHWAB || [];
+  if (name === ACCT_ETRADE) return window.SEED_ETRADE || [];
+  if (name === ACCT_OLD) return window.SEED_HOLDINGS || [];
   return [];
 }
 
-// Default accounts the first time the app runs.
-//
-// The old single-portfolio data (SEED_HOLDINGS) is already the COMBINED total of
-// all three brokerages, so it becomes the base account. We can't split Robinhood
-// vs Schwab vs old-E*TRADE out of that single number, so instead of re-adding the
-// whole E*TRADE screenshot (which would double-count) we add only the new money
-// put into E*TRADE since the snapshot. Total = base + additions.
+// Default accounts the first time the app runs. Three live accounts transcribed
+// from the user's current brokerage screenshots make up the Total. The old
+// combined 2026-08-20 snapshot is kept as a read-only "Old" reference tab
+// (reference:true) and is excluded from the Total so it never double-counts.
 function seedAccounts() {
-  const additions = (window.SEED_ETRADE_ADDITIONS || []).map(makeHolding);
-  let base = null;
-  try {
-    const raw = localStorage.getItem(OLD_STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) base = parsed.map(makeHolding);
-    }
-  } catch (e) { /* ignore */ }
-  if (!base) base = (window.SEED_HOLDINGS || []).map(makeHolding);
   return [
-    { id: cryptoId(), name: BASE_ACCT, holdings: base },
-    { id: cryptoId(), name: ADDITIONS_ACCT, holdings: additions },
+    { id: cryptoId(), name: ACCT_ROBINHOOD, holdings: (window.SEED_ROBINHOOD || []).map(makeHolding) },
+    { id: cryptoId(), name: ACCT_SCHWAB, holdings: (window.SEED_SCHWAB || []).map(makeHolding) },
+    { id: cryptoId(), name: ACCT_ETRADE, holdings: (window.SEED_ETRADE || []).map(makeHolding) },
+    { id: cryptoId(), name: ACCT_OLD, reference: true, holdings: (window.SEED_HOLDINGS || []).map(makeHolding) },
   ];
 }
 
@@ -124,6 +117,7 @@ function loadAccounts() {
         return data.accounts.map((a) => ({
           id: a.id || cryptoId(),
           name: a.name || "Account",
+          reference: !!a.reference,
           holdings: (a.holdings || []).map((h) => ({
             id: h.id || cryptoId(),
             symbol: String(h.symbol).toUpperCase(),
@@ -143,18 +137,27 @@ function saveAccounts() {
   try {
     localStorage.setItem(ACCOUNTS_KEY, JSON.stringify({
       activeId,
-      accounts: accounts.map((a) => ({ id: a.id, name: a.name, holdings: a.holdings })),
+      accounts: accounts.map((a) => ({ id: a.id, name: a.name, reference: !!a.reference, holdings: a.holdings })),
     }));
   } catch (e) { /* ignore quota */ }
 }
 
 function isTotalView() { return activeId === TOTAL_ID; }
 function activeAccount() { return accounts.find((a) => a.id === activeId) || null; }
+// Read-only views: the computed Total and any reference account (e.g. "Old").
+function isReadOnly() {
+  if (isTotalView()) return true;
+  const a = activeAccount();
+  return !!(a && a.reference);
+}
 
-// Total view: aggregate the same symbol across every account (shares summed).
+// Total view: aggregate the same symbol across every live account (shares
+// summed). Reference accounts (the "Old" snapshot) are excluded so they never
+// double-count against the live accounts.
 function computeTotalHoldings() {
   const map = new Map();
   for (const acc of accounts) {
+    if (acc.reference) continue;
     for (const h of acc.holdings) {
       const cur = map.get(h.symbol);
       if (cur) {
@@ -175,9 +178,9 @@ function syncHoldings() {
     : (activeAccount() ? activeAccount().holdings : []);
 }
 
-// Persist edits to the active (real) account. No-op for the computed Total.
+// Persist edits to the active (real) account. No-op for read-only views.
 function save(list) {
-  if (isTotalView()) return;
+  if (isReadOnly()) return;
   const acc = activeAccount();
   if (!acc) return;
   acc.holdings = list || holdings;
@@ -196,11 +199,11 @@ function renderTabs() {
 }
 
 function updateEditability() {
-  const total = isTotalView();
+  const ro = isReadOnly();
   const add = document.getElementById("add-btn");
   const reset = document.getElementById("reset-btn");
-  if (add) { add.disabled = total; add.style.opacity = total ? "0.35" : ""; }
-  if (reset) reset.style.display = total ? "none" : "";
+  if (add) { add.disabled = ro; add.style.opacity = ro ? "0.35" : ""; }
+  if (reset) reset.style.display = ro ? "none" : "";
 }
 
 function setActive(id) {
@@ -228,8 +231,15 @@ function addAccount() {
 // ---------- pricing helpers ----------
 // Effective price for a holding: live quote if available & not manual,
 // otherwise the stored (fallback/manual) price.
+// True while a reference account (the "Old" snapshot) is the active view: its
+// holdings always show their captured prices, never live quotes.
+function viewingReference() {
+  const a = activeAccount();
+  return !!(a && a.reference);
+}
+
 function effectivePrice(h) {
-  if (!h.manual) {
+  if (!viewingReference() && !h.manual) {
     const q = quotes[h.symbol];
     if (q && typeof q.price === "number") return q.price;
   }
@@ -237,14 +247,14 @@ function effectivePrice(h) {
 }
 
 function isStale(h) {
-  if (h.manual) return false;
+  if (h.manual || viewingReference()) return false;
   const q = quotes[h.symbol];
   return !q || typeof q.price !== "number";
 }
 
 function dayChangeFor(h) {
   // returns { abs, pct } change in *value* for today, or null if unknown
-  if (h.manual) return null;
+  if (h.manual || viewingReference()) return null;
   const q = quotes[h.symbol];
   if (!q || typeof q.price !== "number" || typeof q.previousClose !== "number" || q.previousClose === 0) return null;
   const perShare = q.price - q.previousClose;
@@ -319,7 +329,7 @@ function renderRow(h, value, dc) {
   // Tapping a row opens the ticker on Yahoo Finance. Manual-only holdings
   // (CUSIPs, warrants, delisted) have no Yahoo page, so tapping edits instead.
   li.addEventListener("click", () => {
-    if (!isTotalView() && h.manual) { openModal(h); return; }
+    if (!isReadOnly() && h.manual) { openModal(h); return; }
     if (!/^\d/.test(h.symbol)) window.open(yahooUrl(h.symbol), "_blank", "noopener,noreferrer");
   });
 
@@ -350,7 +360,7 @@ function renderRow(h, value, dc) {
       <div class="v">${fmtMoney(value, 0)}</div>
       <div class="w">${(value ? (value / currentTotal() * 100) : 0).toFixed(1)}%</div>
     </div>
-    ${isTotalView() ? "" : `<button class="edit-btn" aria-label="Edit ${escapeHtml(h.symbol)}" title="Edit">✎</button>`}`;
+    ${isReadOnly() ? "" : `<button class="edit-btn" aria-label="Edit ${escapeHtml(h.symbol)}" title="Edit">✎</button>`}`;
   // The pencil edits the holding; stop propagation so it doesn't also open Yahoo.
   const editBtn = li.querySelector(".edit-btn");
   if (editBtn) editBtn.addEventListener("click", (e) => { e.stopPropagation(); openModal(h); });
@@ -380,6 +390,7 @@ async function refresh() {
       // so net worth stays accurate even if a later fetch fails or we're offline.
       let changed = false;
       for (const acc of accounts) {
+        if (acc.reference) continue;   // never overwrite the Old snapshot's prices
         for (const h of acc.holdings) {
           const q = quotes[h.symbol];
           if (q && typeof q.price === "number" && h.price !== q.price) { h.price = q.price; changed = true; }
@@ -635,7 +646,7 @@ function renderChart(data, uiRange) {
 
 // ---------- modal (add / edit) ----------
 function openModal(h) {
-  if (isTotalView()) return; // Total is a read-only aggregate
+  if (isReadOnly()) return; // Total and the "Old" snapshot are read-only
   editingId = h ? h.id : null;
   document.getElementById("modal-title").textContent = h ? "Edit holding" : "Add holding";
   document.getElementById("f-symbol").value = h ? h.symbol : "";
@@ -711,7 +722,7 @@ document.getElementById("modal").addEventListener("click", (e) => {
   if (e.target.id === "modal") closeModal();
 });
 document.getElementById("reset-btn").addEventListener("click", () => {
-  if (isTotalView()) { alert("Switch to an account tab to reset it."); return; }
+  if (isReadOnly()) { alert("Switch to an editable account tab to reset it."); return; }
   const acc = activeAccount();
   if (!acc) return;
   if (confirm(`Reset “${acc.name}” back to its original holdings? This clears your edits to this account.`)) {
