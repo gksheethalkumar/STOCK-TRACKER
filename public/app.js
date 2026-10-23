@@ -2,6 +2,10 @@
 
 const OLD_STORAGE_KEY = "stocktracker.holdings.v1";   // pre-multi-account data
 const ACCOUNTS_KEY = "stocktracker.accounts.v3";      // v3: real per-account data
+// Bump SEED_VERSION whenever the seed.js account data changes; the app then
+// re-seeds from seed.js on next load so corrections actually reach the device
+// (stored accounts with an older version are discarded).
+const SEED_VERSION = 4;
 const TOTAL_ID = "__total__";
 const REFRESH_MS = 60000; // auto-refresh cadence while the app is open (1 min)
 
@@ -112,7 +116,8 @@ function loadAccounts() {
     const raw = localStorage.getItem(ACCOUNTS_KEY);
     if (raw) {
       const data = JSON.parse(raw);
-      if (data && Array.isArray(data.accounts) && data.accounts.length > 0) {
+      if (data && data.version === SEED_VERSION &&
+          Array.isArray(data.accounts) && data.accounts.length > 0) {
         activeId = data.activeId || TOTAL_ID;
         return data.accounts.map((a) => ({
           id: a.id || cryptoId(),
@@ -136,6 +141,7 @@ function loadAccounts() {
 function saveAccounts() {
   try {
     localStorage.setItem(ACCOUNTS_KEY, JSON.stringify({
+      version: SEED_VERSION,
       activeId,
       accounts: accounts.map((a) => ({ id: a.id, name: a.name, reference: !!a.reference, holdings: a.holdings })),
     }));
