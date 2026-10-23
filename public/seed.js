@@ -65,3 +65,28 @@ window.SEED_HOLDINGS = [
   { symbol: "040405102", shares: 200000, price: 0.0, manual: true },
   { symbol: "90118L202", shares: 250000, price: 0.0, manual: true },
 ];
+
+// E*TRADE account (-7865), from the 2026-10-23 portfolio screenshots.
+// `price` is the quoted Ask at capture time; live quotes replace it.
+window.SEED_ETRADE = [
+  { symbol: "AMZN", shares: 47.352, price: 250.50 },
+  { symbol: "AVGO", shares: 14.436, price: 323.40 },
+  { symbol: "BE", shares: 26.677, price: 218.15 },
+  { symbol: "DRAM", shares: 48.635, price: 45.84 },
+  { symbol: "GOOG", shares: 16.294, price: 320.87 },
+  { symbol: "GOOGL", shares: 54.343, price: 324.23 },
+  { symbol: "IREN", shares: 155.027, price: 25.51 },
+  { symbol: "META", shares: 15.01, price: 648.91 },
+  { symbol: "MP", shares: 100, price: 38.60 },
+  { symbol: "MSFT", shares: 16.029, price: 521.64 },
+  { symbol: "MU", shares: 2, price: 857.02 },
+  { symbol: "ORCL", shares: 73.565, price: 125.51 },
+  { symbol: "QCOM", shares: 28.08, price: 172.93 },
+  { symbol: "QQQ", shares: 119.558, price: 704.62 },
+  { symbol: "QQQM", shares: 21.021, price: 290.13 },
+  { symbol: "SCHD", shares: 1413.85, price: 35.40 },
+  { symbol: "SPCX", shares: 60, price: 144.75 },
+  { symbol: "SPY", shares: 39, price: 764.04 },
+  { symbol: "VOO", shares: 14.762, price: 702.31 },
+  { symbol: "VTI", shares: 142.513, price: 375.13 },
+];

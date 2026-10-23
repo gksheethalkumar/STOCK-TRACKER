@@ -134,6 +134,32 @@ main { padding: 0 12px calc(var(--safe-bottom) + 24px); max-width: 720px; margin
 .lh-price { text-align: right; min-width: 92px; }
 .lh-val { text-align: right; min-width: 96px; }
 
+/* ---------- Account tabs ---------- */
+.account-tabs {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 10px 0 2px;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.account-tabs::-webkit-scrollbar { display: none; }
+.acct-tab {
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  background: var(--bg-elev);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 7px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.acct-tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.acct-tab.add { font-weight: 700; }
+.acct-tab:active { transform: scale(0.96); }
+
 /* ---------- Growth chart ---------- */
 .chart-card {
   margin: 12px 0 4px;

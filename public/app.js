@@ -1,12 +1,14 @@
 "use strict";
 
-const STORAGE_KEY = "stocktracker.holdings.v1";
+const OLD_STORAGE_KEY = "stocktracker.holdings.v1";   // pre-multi-account data
+const ACCOUNTS_KEY = "stocktracker.accounts.v1";
+const TOTAL_ID = "__total__";
 const REFRESH_MS = 60000; // auto-refresh cadence while the app is open (1 min)
 
-let holdings = [];        // populated in boot(); NOT via loadHoldings() here,
-                          // because loadHoldings() -> save() assigns to
-                          // `holdings`, which would hit the temporal dead zone
-                          // if done during this binding's initialization.
+let accounts = [];        // [{ id, name, holdings: [...] }]
+let activeId = TOTAL_ID;  // TOTAL_ID (all accounts) or a specific account id
+let holdings = [];        // active view's holdings: a real account's array, or
+                          // the computed Total. Populated in boot().
 let quotes = {};          // symbol -> { price, previousClose, ... }
 let editingId = null;
 let refreshTimer = null;
@@ -63,43 +65,157 @@ function updateSummaryDisplay() {
   }
 }
 
-// ---------- persistence ----------
-function loadHoldings() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      // Only trust a non-empty array. An empty array can happen if the very
-      // first load ran before seed.js was ready (e.g. during a cold start),
-      // so we re-seed instead of getting stuck on an empty portfolio.
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-    }
-  } catch (e) { /* fall through to seed */ }
-  return seedHoldings();
+// ---------- accounts & persistence ----------
+function cryptoId() {
+  if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+  return "id-" + Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
-function seedHoldings() {
-  const seed = (window.SEED_HOLDINGS || []).map((h) => ({
+function makeHolding(h) {
+  return {
     id: cryptoId(),
     symbol: String(h.symbol).toUpperCase(),
     shares: Number(h.shares) || 0,
     price: Number(h.price) || 0,   // fallback / manual price
     manual: !!h.manual,
-  }));
-  // Never persist an empty seed (would happen only if seed.js failed to load);
-  // leaving storage untouched lets the next load seed correctly.
-  if (seed.length > 0) save(seed);
-  return seed;
+  };
 }
 
+function seedFor(name) {
+  if (name === "E*TRADE") return window.SEED_ETRADE || [];
+  if (name === "Robinhood/Schwab") return window.SEED_HOLDINGS || [];
+  return [];
+}
+
+// Default accounts the first time the app runs. E*TRADE comes from the
+// screenshot seed; the previous single-portfolio data (or SEED_HOLDINGS) becomes
+// the combined Robinhood/Schwab account until those are provided separately.
+function seedAccounts() {
+  const etrade = (window.SEED_ETRADE || []).map(makeHolding);
+  let base = null;
+  try {
+    const raw = localStorage.getItem(OLD_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) base = parsed.map(makeHolding);
+    }
+  } catch (e) { /* ignore */ }
+  if (!base) base = (window.SEED_HOLDINGS || []).map(makeHolding);
+  return [
+    { id: cryptoId(), name: "E*TRADE", holdings: etrade },
+    { id: cryptoId(), name: "Robinhood/Schwab", holdings: base },
+  ];
+}
+
+function loadAccounts() {
+  try {
+    const raw = localStorage.getItem(ACCOUNTS_KEY);
+    if (raw) {
+      const data = JSON.parse(raw);
+      if (data && Array.isArray(data.accounts) && data.accounts.length > 0) {
+        activeId = data.activeId || TOTAL_ID;
+        return data.accounts.map((a) => ({
+          id: a.id || cryptoId(),
+          name: a.name || "Account",
+          holdings: (a.holdings || []).map((h) => ({
+            id: h.id || cryptoId(),
+            symbol: String(h.symbol).toUpperCase(),
+            shares: Number(h.shares) || 0,
+            price: Number(h.price) || 0,
+            manual: !!h.manual,
+          })),
+        }));
+      }
+    }
+  } catch (e) { /* fall through to seed */ }
+  activeId = TOTAL_ID;
+  return seedAccounts();
+}
+
+function saveAccounts() {
+  try {
+    localStorage.setItem(ACCOUNTS_KEY, JSON.stringify({
+      activeId,
+      accounts: accounts.map((a) => ({ id: a.id, name: a.name, holdings: a.holdings })),
+    }));
+  } catch (e) { /* ignore quota */ }
+}
+
+function isTotalView() { return activeId === TOTAL_ID; }
+function activeAccount() { return accounts.find((a) => a.id === activeId) || null; }
+
+// Total view: aggregate the same symbol across every account (shares summed).
+function computeTotalHoldings() {
+  const map = new Map();
+  for (const acc of accounts) {
+    for (const h of acc.holdings) {
+      const cur = map.get(h.symbol);
+      if (cur) {
+        cur.shares += h.shares;
+        if (!h.manual) cur.manual = false;        // live if any account is live
+        if (!cur.price && h.price) cur.price = h.price;
+      } else {
+        map.set(h.symbol, { id: "total-" + h.symbol, symbol: h.symbol, shares: h.shares, price: h.price, manual: h.manual });
+      }
+    }
+  }
+  return [...map.values()];
+}
+
+function syncHoldings() {
+  holdings = isTotalView()
+    ? computeTotalHoldings()
+    : (activeAccount() ? activeAccount().holdings : []);
+}
+
+// Persist edits to the active (real) account. No-op for the computed Total.
 function save(list) {
-  holdings = list || holdings;
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(holdings)); } catch (e) {}
+  if (isTotalView()) return;
+  const acc = activeAccount();
+  if (!acc) return;
+  acc.holdings = list || holdings;
+  holdings = acc.holdings;
+  saveAccounts();
 }
 
-function cryptoId() {
-  if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
-  return "id-" + Math.random().toString(36).slice(2) + Date.now().toString(36);
+// ---------- tabs / account switching ----------
+function renderTabs() {
+  const bar = document.getElementById("account-tabs");
+  if (!bar) return;
+  const tabs = [{ id: TOTAL_ID, name: "Total" }].concat(accounts.map((a) => ({ id: a.id, name: a.name })));
+  bar.innerHTML = tabs.map((t) =>
+    `<button class="acct-tab${t.id === activeId ? " active" : ""}" data-id="${t.id}">${escapeHtml(t.name)}</button>`
+  ).join("") + `<button class="acct-tab add" data-id="__add__" title="Add account" aria-label="Add account">＋</button>`;
+}
+
+function updateEditability() {
+  const total = isTotalView();
+  const add = document.getElementById("add-btn");
+  const reset = document.getElementById("reset-btn");
+  if (add) { add.disabled = total; add.style.opacity = total ? "0.35" : ""; }
+  if (reset) reset.style.display = total ? "none" : "";
+}
+
+function setActive(id) {
+  if (id === "__add__") { addAccount(); return; }
+  activeId = id;
+  syncHoldings();
+  HISTORY.base = null; HISTORY.max = null; HISTORY.retries = {};
+  saveAccounts();
+  renderTabs();
+  updateEditability();
+  render();
+  refresh();
+  loadChart(HISTORY.range);
+}
+
+function addAccount() {
+  const name = (prompt("New account name (e.g. Robinhood, Schwab):") || "").trim();
+  if (!name) return;
+  const acc = { id: cryptoId(), name, holdings: [] };
+  accounts.push(acc);
+  saveAccounts();
+  setActive(acc.id);
 }
 
 // ---------- pricing helpers ----------
@@ -159,6 +275,7 @@ function render() {
   const list = document.getElementById("holdings");
   const empty = document.getElementById("empty");
 
+  if (isTotalView()) holdings = computeTotalHoldings();
   const sorted = [...holdings].sort((a, b) => holdingValue(b) - holdingValue(a));
 
   empty.hidden = sorted.length > 0;
@@ -195,8 +312,8 @@ function renderRow(h, value, dc) {
   // Tapping a row opens the ticker on Yahoo Finance. Manual-only holdings
   // (CUSIPs, warrants, delisted) have no Yahoo page, so tapping edits instead.
   li.addEventListener("click", () => {
-    if (h.manual) { openModal(h); return; }
-    window.open(yahooUrl(h.symbol), "_blank", "noopener,noreferrer");
+    if (!isTotalView() && h.manual) { openModal(h); return; }
+    if (!/^\d/.test(h.symbol)) window.open(yahooUrl(h.symbol), "_blank", "noopener,noreferrer");
   });
 
   const price = effectivePrice(h);
@@ -226,7 +343,7 @@ function renderRow(h, value, dc) {
       <div class="v">${fmtMoney(value, 0)}</div>
       <div class="w">${(value ? (value / currentTotal() * 100) : 0).toFixed(1)}%</div>
     </div>
-    <button class="edit-btn" aria-label="Edit ${escapeHtml(h.symbol)}" title="Edit">✎</button>`;
+    ${isTotalView() ? "" : `<button class="edit-btn" aria-label="Edit ${escapeHtml(h.symbol)}" title="Edit">✎</button>`}`;
   // The pencil edits the holding; stop propagation so it doesn't also open Yahoo.
   const editBtn = li.querySelector(".edit-btn");
   if (editBtn) editBtn.addEventListener("click", (e) => { e.stopPropagation(); openModal(h); });
@@ -252,14 +369,16 @@ async function refresh() {
       const res = await fetch(url, { cache: "no-store" });
       const data = await res.json();
       quotes = data.quotes || {};
-      // Persist last good live price as the new fallback, so net worth stays
-      // accurate even if a later fetch fails or the app is opened offline.
+      // Persist last good live price as the new fallback (across every account),
+      // so net worth stays accurate even if a later fetch fails or we're offline.
       let changed = false;
-      for (const h of holdings) {
-        const q = quotes[h.symbol];
-        if (q && typeof q.price === "number" && h.price !== q.price) { h.price = q.price; changed = true; }
+      for (const acc of accounts) {
+        for (const h of acc.holdings) {
+          const q = quotes[h.symbol];
+          if (q && typeof q.price === "number" && h.price !== q.price) { h.price = q.price; changed = true; }
+        }
       }
-      if (changed) save();
+      if (changed) saveAccounts();
     }
     setUpdated(new Date());
     setMarketState();
@@ -343,10 +462,11 @@ function sliceData(data, n) {
 async function fetchDataset(kind) {
   const sig = topSymbols().join(",");
 
-  // 1) Reuse on-device cache if it's fresh and for the same holdings.
+  // 1) Reuse on-device cache if it's fresh and for the same holdings. Cache is
+  // nested by symbol-set so each account keeps its own history.
   const store = loadHistStore();
-  const entry = store[kind];
-  if (entry && entry.sig === sig && (Date.now() - entry.at) < HIST_MAX_AGE_MS &&
+  const entry = store[kind] && store[kind][sig];
+  if (entry && (Date.now() - entry.at) < HIST_MAX_AGE_MS &&
       entry.data && (entry.data.timeline || []).length >= 2) {
     HISTORY[kind] = entry.data;
     return entry.data;
@@ -359,7 +479,8 @@ async function fetchDataset(kind) {
   if ((data && data.error) || (data.timeline || []).length >= 2) {
     HISTORY[kind] = data;
     if (!data.error && (data.timeline || []).length >= 2) {
-      store[kind] = { at: Date.now(), sig, data };
+      if (!store[kind]) store[kind] = {};
+      store[kind][sig] = { at: Date.now(), data };
       saveHistStore(store);
     }
   }
@@ -507,6 +628,7 @@ function renderChart(data, uiRange) {
 
 // ---------- modal (add / edit) ----------
 function openModal(h) {
+  if (isTotalView()) return; // Total is a read-only aggregate
   editingId = h ? h.id : null;
   document.getElementById("modal-title").textContent = h ? "Edit holding" : "Add holding";
   document.getElementById("f-symbol").value = h ? h.symbol : "";
@@ -582,13 +704,21 @@ document.getElementById("modal").addEventListener("click", (e) => {
   if (e.target.id === "modal") closeModal();
 });
 document.getElementById("reset-btn").addEventListener("click", () => {
-  if (confirm("Reset all holdings back to the original portfolio? This clears your edits.")) {
-    localStorage.removeItem(STORAGE_KEY);
-    holdings = seedHoldings();
+  if (isTotalView()) { alert("Switch to an account tab to reset it."); return; }
+  const acc = activeAccount();
+  if (!acc) return;
+  if (confirm(`Reset “${acc.name}” back to its original holdings? This clears your edits to this account.`)) {
+    acc.holdings = seedFor(acc.name).map(makeHolding);
+    holdings = acc.holdings;
+    saveAccounts();
     render();
     refresh();
     invalidateChart();
   }
+});
+document.getElementById("account-tabs").addEventListener("click", (e) => {
+  const btn = e.target.closest(".acct-tab");
+  if (btn) setActive(btn.dataset.id);
 });
 document.getElementById("range-tabs").addEventListener("click", (e) => {
   const btn = e.target.closest(".range-tab");
@@ -614,7 +744,11 @@ function startAutoRefresh() {
 
 // ---------- boot ----------
 updateHideBtn();
-holdings = loadHoldings();
+accounts = loadAccounts();
+saveAccounts();        // persist the initial seed on first run
+syncHoldings();
+renderTabs();
+updateEditability();
 render();
 refresh();
 loadChart(HISTORY.range);
