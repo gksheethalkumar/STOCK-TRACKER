@@ -66,27 +66,32 @@ window.SEED_HOLDINGS = [
   { symbol: "90118L202", shares: 250000, price: 0.0, manual: true },
 ];
 
-// E*TRADE account (-7865), from the 2026-10-23 portfolio screenshots.
-// `price` is the quoted Ask at capture time; live quotes replace it.
-window.SEED_ETRADE = [
-  { symbol: "AMZN", shares: 47.352, price: 250.50 },
+// IMPORTANT: SEED_HOLDINGS above is already the COMBINED total of all three
+// brokerages (Robinhood + Schwab + E*TRADE) as of the 2026-08-20 snapshot.
+//
+// The 2026-10-23 E*TRADE screenshot (account -7865) is only the E*TRADE slice,
+// most of which is already inside SEED_HOLDINGS. Adding the whole screenshot
+// would double-count. So we only seed the *new money* added to E*TRADE since
+// the old snapshot:
+//   - Brand-new tickers not present in the old total at all.
+//   - Forced increases: symbols whose current E*TRADE share count already
+//     exceeds the entire old combined total, so the surplus must be new
+//     (AMZN 47.352 vs old 20 -> +27.352; GOOGL 54.343 vs old 29.337 -> +25.006).
+// `price` is the E*TRADE Ask at capture time; live quotes replace it.
+//
+// Full E*TRADE screenshot (-7865), kept for future diffing when a new
+// screenshot arrives:
+//   AMZN 47.352, AVGO 14.436, BE 26.677, DRAM 48.635, GOOG 16.294,
+//   GOOGL 54.343, IREN 155.027, META 15.01, MP 100, MSFT 16.029, MU 2,
+//   ORCL 73.565, QCOM 28.08, QQQ 119.558, QQQM 21.021, SCHD 1413.85,
+//   SPCX 60, SPY 39, VOO 14.762, VTI 142.513.
+window.SEED_ETRADE_ADDITIONS = [
   { symbol: "AVGO", shares: 14.436, price: 323.40 },
-  { symbol: "BE", shares: 26.677, price: 218.15 },
-  { symbol: "DRAM", shares: 48.635, price: 45.84 },
   { symbol: "GOOG", shares: 16.294, price: 320.87 },
-  { symbol: "GOOGL", shares: 54.343, price: 324.23 },
-  { symbol: "IREN", shares: 155.027, price: 25.51 },
-  { symbol: "META", shares: 15.01, price: 648.91 },
   { symbol: "MP", shares: 100, price: 38.60 },
-  { symbol: "MSFT", shares: 16.029, price: 521.64 },
   { symbol: "MU", shares: 2, price: 857.02 },
   { symbol: "ORCL", shares: 73.565, price: 125.51 },
   { symbol: "QCOM", shares: 28.08, price: 172.93 },
-  { symbol: "QQQ", shares: 119.558, price: 704.62 },
-  { symbol: "QQQM", shares: 21.021, price: 290.13 },
-  { symbol: "SCHD", shares: 1413.85, price: 35.40 },
-  { symbol: "SPCX", shares: 60, price: 144.75 },
-  { symbol: "SPY", shares: 39, price: 764.04 },
-  { symbol: "VOO", shares: 14.762, price: 702.31 },
-  { symbol: "VTI", shares: 142.513, price: 375.13 },
+  { symbol: "AMZN", shares: 27.352, price: 250.50 },   // E*TRADE 47.352 − old 20
+  { symbol: "GOOGL", shares: 25.006, price: 324.23 },  // E*TRADE 54.343 − old 29.337
 ];

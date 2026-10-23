@@ -1,7 +1,7 @@
 "use strict";
 
 const OLD_STORAGE_KEY = "stocktracker.holdings.v1";   // pre-multi-account data
-const ACCOUNTS_KEY = "stocktracker.accounts.v1";
+const ACCOUNTS_KEY = "stocktracker.accounts.v2";      // v2: no E*TRADE double-count
 const TOTAL_ID = "__total__";
 const REFRESH_MS = 60000; // auto-refresh cadence while the app is open (1 min)
 
@@ -81,17 +81,24 @@ function makeHolding(h) {
   };
 }
 
+const BASE_ACCT = "RH + Schwab + E*TRADE";
+const ADDITIONS_ACCT = "E*TRADE — new buys";
+
 function seedFor(name) {
-  if (name === "E*TRADE") return window.SEED_ETRADE || [];
-  if (name === "Robinhood/Schwab") return window.SEED_HOLDINGS || [];
+  if (name === ADDITIONS_ACCT) return window.SEED_ETRADE_ADDITIONS || [];
+  if (name === BASE_ACCT) return window.SEED_HOLDINGS || [];
   return [];
 }
 
-// Default accounts the first time the app runs. E*TRADE comes from the
-// screenshot seed; the previous single-portfolio data (or SEED_HOLDINGS) becomes
-// the combined Robinhood/Schwab account until those are provided separately.
+// Default accounts the first time the app runs.
+//
+// The old single-portfolio data (SEED_HOLDINGS) is already the COMBINED total of
+// all three brokerages, so it becomes the base account. We can't split Robinhood
+// vs Schwab vs old-E*TRADE out of that single number, so instead of re-adding the
+// whole E*TRADE screenshot (which would double-count) we add only the new money
+// put into E*TRADE since the snapshot. Total = base + additions.
 function seedAccounts() {
-  const etrade = (window.SEED_ETRADE || []).map(makeHolding);
+  const additions = (window.SEED_ETRADE_ADDITIONS || []).map(makeHolding);
   let base = null;
   try {
     const raw = localStorage.getItem(OLD_STORAGE_KEY);
@@ -102,8 +109,8 @@ function seedAccounts() {
   } catch (e) { /* ignore */ }
   if (!base) base = (window.SEED_HOLDINGS || []).map(makeHolding);
   return [
-    { id: cryptoId(), name: "E*TRADE", holdings: etrade },
-    { id: cryptoId(), name: "Robinhood/Schwab", holdings: base },
+    { id: cryptoId(), name: BASE_ACCT, holdings: base },
+    { id: cryptoId(), name: ADDITIONS_ACCT, holdings: additions },
   ];
 }
 
